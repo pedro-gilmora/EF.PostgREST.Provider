@@ -36,7 +36,8 @@ jobs:
       run: |
         try {
           dotnet build
-          dotnet pack -c Release -o ./packaging /p:PackageVersion=${{ env.VERSION }}
+          dotnet test .\PostgREST.DbContext.Provider.Tests\PostgREST.DbContext.Provider.Tests.csproj -c Release 
+          dotnet pack .\PostgREST.DbContext.Provider\PostgREST.DbContext.Provider.csproj -c Release -o ./packaging /p:PackageVersion=${{ env.VERSION }}
         } catch {
           Write-Error @"
         Restore, Package and Test errors: 
