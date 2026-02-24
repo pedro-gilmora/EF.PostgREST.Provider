@@ -1,4 +1,0 @@
-<Solution>
-  <Project Path="PosgREST.DbContext.Provider.Core/PosgREST.DbContext.Provider.Core.csproj" />
-  <Project Path="PosgREST.DbContext.Provider/PosgREST.DbContext.Provider.Console.csproj" />
-</Solution>

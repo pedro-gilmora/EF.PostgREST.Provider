@@ -1,4 +1,4 @@
-name: 'SourceCrafter.DependencyInjection: Build, Test & Deploy for .NET 10'
+name: 'SourceCrafter.EF.PostgREST.Provider: Build, Test & Deploy for .NET 10'
 
 on:
   push:
@@ -35,7 +35,8 @@ jobs:
       id: build
       run: |
         try {
-          .\Package.ps1 -clean false -specificVersion "${{ env.VERSION }}" -test true
+          dotnet build
+          dotnet pack -c Release -o ./packaging /p:PackageVersion=${{ env.VERSION }}
         } catch {
           Write-Error @"
         Restore, Package and Test errors: 

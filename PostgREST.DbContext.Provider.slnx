@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="PostgREST.DbContext.Provider/PostgREST.DbContext.Provider.csproj" />
+  <Project Path="PostgREST.DbContext.Provider.Tests/PostgREST.DbContext.Provider.Tests.csproj" />
+</Solution>
