@@ -69,12 +69,14 @@ public sealed class PostgRestTypeMapping : CoreTypeMapping
     {
         var underlying = Nullable.GetUnderlyingType(clrType) ?? clrType;
 
+#pragma warning disable EF1001 // Internal EF Core API usage — required for provider-level temp value generators
         if (underlying == typeof(int))
             return (_, _) => new TemporaryIntValueGenerator();
         if (underlying == typeof(long))
             return (_, _) => new TemporaryLongValueGenerator();
         if (underlying == typeof(short))
             return (_, _) => new TemporaryShortValueGenerator();
+#pragma warning restore EF1001
         if (underlying == typeof(Guid))
             return (_, _) => new GuidValueGenerator();
 

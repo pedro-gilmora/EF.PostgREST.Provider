@@ -1,6 +1,7 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage;
+using PosgREST.DbContext.Provider.Core;
 
 namespace PosgREST.DbContext.Provider.Core.Query;
 
@@ -13,12 +14,13 @@ public sealed class PostgRestQueryExpression : Expression
 {
     /// <summary>
     /// Creates a new query expression targeting the specified entity type.
-    /// The table name defaults to the CLR type name in lowercase.
+    /// The table name is resolved from <c>[Table]</c> / <c>ToTable()</c>
+    /// configuration, falling back to the CLR type name in lowercase.
     /// </summary>
     public PostgRestQueryExpression(IEntityType entityType)
     {
         EntityType = entityType;
-        TableName = entityType.ClrType.Name.ToLowerInvariant();
+        TableName = entityType.TableName;
     }
 
     /// <summary>The entity type this query targets.</summary>

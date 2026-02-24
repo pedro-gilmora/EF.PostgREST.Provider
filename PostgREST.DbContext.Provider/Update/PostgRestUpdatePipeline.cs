@@ -1,10 +1,13 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Metadata.Internal;
+using Microsoft.EntityFrameworkCore.Update;
+
+using PosgREST.DbContext.Provider.Core.Infrastructure;
+
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata;
-using Microsoft.EntityFrameworkCore.Update;
-using PosgREST.DbContext.Provider.Core.Infrastructure;
 
 namespace PosgREST.DbContext.Provider.Core.Update;
 
@@ -52,7 +55,7 @@ public sealed class PostgRestUpdatePipeline
         {
             using var request = BuildRequest(entry);
             using var response = _httpClient.Send(request, HttpCompletionOption.ResponseContentRead);
-            response.EnsureSuccessStatusCode();
+            PostgRestException.ThrowIfError(response);
 
             PropagateServerValues(entry, response);
             affected++;
@@ -78,7 +81,8 @@ public sealed class PostgRestUpdatePipeline
             using var response = await _httpClient
                 .SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken)
                 .ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
+            await PostgRestException.ThrowIfErrorAsync(response, cancellationToken)
+                .ConfigureAwait(false);
 
             await PropagateServerValuesAsync(entry, response, cancellationToken)
                 .ConfigureAwait(false);
@@ -274,7 +278,7 @@ public sealed class PostgRestUpdatePipeline
 
     private HttpRequestMessage BuildPostRequest(IUpdateEntry entry)
     {
-        var tableName = GetTableName(entry.EntityType);
+        var tableName = entry.EntityType.TableName;
         var url = $"{BaseUrl}/{tableName}";
         var body = SerializeAllProperties(entry);
 
@@ -290,7 +294,7 @@ public sealed class PostgRestUpdatePipeline
 
     private HttpRequestMessage BuildPatchRequest(IUpdateEntry entry)
     {
-        var tableName = GetTableName(entry.EntityType);
+        var tableName = entry.EntityType.TableName;
         var pkFilter = BuildPrimaryKeyFilter(entry);
         var url = $"{BaseUrl}/{tableName}?{pkFilter}";
         var body = SerializeModifiedProperties(entry);
@@ -307,7 +311,7 @@ public sealed class PostgRestUpdatePipeline
 
     private HttpRequestMessage BuildDeleteRequest(IUpdateEntry entry)
     {
-        var tableName = GetTableName(entry.EntityType);
+        var tableName = entry.EntityType.TableName;
         var pkFilter = BuildPrimaryKeyFilter(entry);
         var url = $"{BaseUrl}/{tableName}?{pkFilter}";
 
@@ -333,7 +337,7 @@ public sealed class PostgRestUpdatePipeline
                 && entry.HasTemporaryValue(property))
                 continue;
 
-            var columnName = property.Name.ToLowerInvariant();
+            var columnName = property.ColumnName;
             var value = entry.GetCurrentValue(property);
             dict[columnName] = FormatPropertyValue(value);
         }
@@ -350,7 +354,7 @@ public sealed class PostgRestUpdatePipeline
             if (!entry.IsModified(property))
                 continue;
 
-            var columnName = property.Name.ToLowerInvariant();
+            var columnName = property.ColumnName;
             var value = entry.GetCurrentValue(property);
             dict[columnName] = FormatPropertyValue(value);
         }
@@ -384,7 +388,7 @@ public sealed class PostgRestUpdatePipeline
 
         foreach (var pkProperty in pk.Properties)
         {
-            var columnName = pkProperty.Name.ToLowerInvariant();
+            var columnName = pkProperty.ColumnName;
             // Use original value for the filter — the PK might have been changed
             var value = entry.GetOriginalValue(pkProperty);
             var formatted = FormatFilterValue(value);
@@ -450,7 +454,7 @@ public sealed class PostgRestUpdatePipeline
             if (property.ValueGenerated == ValueGenerated.Never)
                 continue;
 
-            var columnName = property.Name.ToLowerInvariant();
+            var columnName = property.ColumnName;
             if (!element.TryGetProperty(columnName, out var jsonProp))
                 continue;
 
@@ -493,9 +497,6 @@ public sealed class PostgRestUpdatePipeline
     // ──────────────────────────────────────────────
 
     private string BaseUrl => _options.BaseUrl.TrimEnd('/');
-
-    private static string GetTableName(IEntityType entityType)
-        => entityType.ClrType.Name.ToLowerInvariant();
 
     private static StringContent CreateJsonContent(string json)
         => new(json, Encoding.UTF8, "application/json");

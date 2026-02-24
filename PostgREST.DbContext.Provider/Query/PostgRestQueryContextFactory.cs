@@ -28,5 +28,5 @@ public class PostgRestQueryContextFactory : IQueryContextFactory
 
     /// <inheritdoc />
     public QueryContext Create()
-        => new PostgRestQueryContext(_dependencies, _httpClient, _options.BaseUrl);
+        => new PostgRestQueryContext(_dependencies, _httpClient, _options);
 }

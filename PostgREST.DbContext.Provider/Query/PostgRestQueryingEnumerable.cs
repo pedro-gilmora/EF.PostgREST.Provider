@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Query;
@@ -137,7 +138,7 @@ public sealed class PostgRestQueryingEnumerable<T> : IEnumerable<T>, IAsyncEnume
         for (var i = 0; i < properties.Count; i++)
         {
             var prop = properties[i];
-            var columnName = prop.Name.ToLowerInvariant();
+            var columnName = prop.ColumnName;
 
             if (element.TryGetProperty(columnName, out var jsonProp)
                 && jsonProp.ValueKind != JsonValueKind.Undefined)
@@ -181,6 +182,21 @@ public sealed class PostgRestQueryingEnumerable<T> : IEnumerable<T>, IAsyncEnume
         return JsonSerializer.Deserialize(element.GetRawText(), targetType);
     }
 
+    /// <summary>
+    /// Applies common HTTP headers (Accept, Authorization, Schema profiles)
+    /// to the given request based on the current query context options.
+    /// </summary>
+    private static void ApplyHeaders(HttpRequestMessage request, PostgRestQueryContext context)
+    {
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        if (context.Options.BearerToken is { } token)
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        if (context.Options.Schema is { } schema)
+            request.Headers.TryAddWithoutValidation("Accept-Profile", schema);
+    }
+
     private sealed class Enumerator : IEnumerator<T>
     {
         private readonly PostgRestQueryingEnumerable<T> _enumerable;
@@ -220,12 +236,12 @@ public sealed class PostgRestQueryingEnumerable<T> : IEnumerable<T>, IAsyncEnume
         {
             var url = _enumerable.BuildUrl();
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Accept.ParseAdd("application/json");
+            ApplyHeaders(request, _enumerable._queryContext);
 
             using var response = _enumerable._queryContext.HttpClient
                 .Send(request, HttpCompletionOption.ResponseContentRead);
 
-            response.EnsureSuccessStatusCode();
+            PostgRestException.ThrowIfError(response);
 
             using var stream = response.Content.ReadAsStream();
             using var doc = JsonDocument.Parse(stream);
@@ -279,13 +295,14 @@ public sealed class PostgRestQueryingEnumerable<T> : IEnumerable<T>, IAsyncEnume
         {
             var url = _enumerable.BuildUrl();
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Accept.ParseAdd("application/json");
+            ApplyHeaders(request, _enumerable._queryContext);
 
             using var response = await _enumerable._queryContext.HttpClient
                 .SendAsync(request, HttpCompletionOption.ResponseContentRead, _cancellationToken)
                 .ConfigureAwait(false);
 
-            response.EnsureSuccessStatusCode();
+            await PostgRestException.ThrowIfErrorAsync(response, _cancellationToken)
+                .ConfigureAwait(false);
 
             using var stream = await response.Content.ReadAsStreamAsync(_cancellationToken)
                 .ConfigureAwait(false);

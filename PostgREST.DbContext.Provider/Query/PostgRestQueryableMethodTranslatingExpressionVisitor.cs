@@ -238,7 +238,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
     /// this is safe.
     /// </para>
     /// </remarks>
-    protected override ShapedQueryExpression? TranslateSelect(
+    protected override ShapedQueryExpression TranslateSelect(
         ShapedQueryExpression source,
         LambdaExpression selector)
     {

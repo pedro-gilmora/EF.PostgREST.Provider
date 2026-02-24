@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore.Query;
+using PosgREST.DbContext.Provider.Core.Infrastructure;
 
 namespace PosgREST.DbContext.Provider.Core.Query;
 
@@ -14,11 +15,12 @@ public class PostgRestQueryContext : QueryContext
     public PostgRestQueryContext(
         QueryContextDependencies dependencies,
         HttpClient httpClient,
-        string baseUrl)
+        PostgRestDbContextOptionsExtension options)
         : base(dependencies)
     {
         HttpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        BaseUrl = baseUrl?.TrimEnd('/') ?? throw new ArgumentNullException(nameof(baseUrl));
+        Options = options ?? throw new ArgumentNullException(nameof(options));
+        BaseUrl = options.BaseUrl?.TrimEnd('/') ?? throw new ArgumentNullException(nameof(options));
     }
 
     /// <summary>The <see cref="System.Net.Http.HttpClient"/> for PostgREST requests.</summary>
@@ -26,4 +28,7 @@ public class PostgRestQueryContext : QueryContext
 
     /// <summary>The PostgREST base URL (without trailing slash).</summary>
     public string BaseUrl { get; }
+
+    /// <summary>The provider options carrying auth token and schema.</summary>
+    public PostgRestDbContextOptionsExtension Options { get; }
 }

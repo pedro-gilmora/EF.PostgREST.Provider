@@ -104,6 +104,25 @@ public class PostgRestTypeMappingSource : TypeMappingSource
         return clrType is not null ? FindMappingForType(clrType) : null;
     }
 
+    /// <inheritdoc />
+    public override CoreTypeMapping? FindMapping(MemberInfo member, IModel model, bool useAttributes)
+    {
+        var clrType = member switch
+        {
+            PropertyInfo pi => pi.PropertyType,
+            FieldInfo fi => fi.FieldType,
+            _ => null
+        };
+
+        return clrType is not null ? FindMappingForType(clrType) : null;
+    }
+
+    /// <inheritdoc />
+    public override CoreTypeMapping? FindMapping(Type type, IModel model, CoreTypeMapping? elementMapping)
+    {
+        return FindMappingForType(type);
+    }
+
     private static PostgRestTypeMapping? FindMappingForType(Type type)
     {
         return _mappingCache.GetOrAdd(type, static t =>

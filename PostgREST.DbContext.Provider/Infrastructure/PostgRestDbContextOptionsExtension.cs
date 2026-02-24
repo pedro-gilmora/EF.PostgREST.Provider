@@ -66,7 +66,6 @@ public sealed class PostgRestDbContextOptionsExtension : IDbContextOptionsExtens
     public void ApplyServices(IServiceCollection services)
     {
         new EntityFrameworkServicesBuilder(services)
-            .TryAddCoreServices()
             .TryAdd<IDatabaseProvider, PostgRestDatabaseProvider>()
             .TryAdd<IDatabase, PostgRestDatabase>()
             .TryAdd<IDatabaseCreator, PostgRestDatabaseCreator>()
@@ -75,11 +74,18 @@ public sealed class PostgRestDbContextOptionsExtension : IDbContextOptionsExtens
             .TryAdd<IQueryContextFactory, PostgRestQueryContextFactory>()
             .TryAdd<IQueryableMethodTranslatingExpressionVisitorFactory, PostgRestQueryableMethodTranslatingExpressionVisitorFactory>()
             .TryAdd<IShapedQueryCompilingExpressionVisitorFactory,
-                PostgRestShapedQueryCompilingExpressionVisitorFactory>();
+                PostgRestShapedQueryCompilingExpressionVisitorFactory>()
+            .TryAddCoreServices();
 
         // Register a default HttpClient if the consumer hasn't provided one.
         // Consumers using IHttpClientFactory can replace this with their own instance.
-        services.TryAddSingleton<HttpClient>();
+        services.TryAddSingleton(_ =>
+        {
+            var client = new HttpClient { BaseAddress = new Uri(BaseUrl.TrimEnd('/') + "/") };
+            if (Timeout is { } timeout)
+                client.Timeout = timeout;
+            return client;
+        });
 
         services.AddSingleton(this);
         services.AddSingleton(sp =>
