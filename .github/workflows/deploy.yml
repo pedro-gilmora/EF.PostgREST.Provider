@@ -38,6 +38,7 @@ jobs:
           dotnet build
           #dotnet test .\PostgREST.DbContext.Provider.Tests\PostgREST.DbContext.Provider.Tests.csproj -c Release 
           dotnet pack .\PostgREST.DbContext.Provider\PostgREST.DbContext.Provider.csproj -c Release -o ./packaging /p:PackageVersion=${{ env.VERSION }}
+          dotnet pack .\PostgREST.DbContext.Provider.Analyzers\PostgREST.DbContext.Provider.Analyzers.csproj -c Release -o ./packaging /p:PackageVersion=${{ env.VERSION }}
         } catch {
           Write-Error @"
         Restore, Package and Test errors: 
@@ -49,17 +50,20 @@ jobs:
       if: github.ref_name == 'master'
       id: publish
       run: |        
-        package=$(find ./packaging -maxdepth 1 -name '*.nupkg' | head -1)
+        for package in $(./packaging -maxdepth 1 -name '*.nupkg'); do
 
-        echo "Found package: $package"
+            echo "Found package: $package"
 
-        # Execute nuget push for each package
-        output=$(dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" | awk '/: error / { print }')
+            # Execute nuget push for each package
+            output=$(dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" | awk '/: error / { print }')
 
-        if [ "${#output}" -ne 0 ]; then
-        echo -e "Restore errors:
-        $output" >> errors.log
-        fi
+            if [ "${#output}" -ne 0 ]; then
+            echo -e "Restore errors:
+            $output" >> errors.log
+            fi
+
+        done
+
 
     - name: Notify Telegram & create GitHub Release
       if: always()
