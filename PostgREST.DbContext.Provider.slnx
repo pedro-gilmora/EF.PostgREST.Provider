@@ -1,4 +1,6 @@
 <Solution>
   <Project Path="PostgREST.DbContext.Provider/PostgREST.DbContext.Provider.csproj" />
   <Project Path="PostgREST.DbContext.Provider.Tests/PostgREST.DbContext.Provider.Tests.csproj" />
+  <Project Path="PostgREST.DbContext.Provider.Analyzers/PostgREST.DbContext.Provider.Analyzers.csproj" />
+  <Project Path="PostgREST.DbContext.Provider.Analyzers.Tests/PostgREST.DbContext.Provider.Analyzers.Tests.csproj" />
 </Solution>
