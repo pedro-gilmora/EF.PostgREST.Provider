@@ -1,0 +1,12 @@
+#!/bin/sh
+
+echo "Running tests before push..."
+dotnet test ./PostgREST.DbContext.Provider.Tests/PostgREST.DbContext.Provider.Tests.csproj --no-restore
+
+if [ $? -ne 0 ]; then
+  echo "Tests failed. Push aborted."
+  exit 1
+fi
+
+echo "All tests passed. Proceeding with push."
+exit 0

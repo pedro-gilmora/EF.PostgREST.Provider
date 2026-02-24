@@ -36,7 +36,7 @@ jobs:
       run: |
         try {
           dotnet build
-          dotnet test .\PostgREST.DbContext.Provider.Tests\PostgREST.DbContext.Provider.Tests.csproj -c Release 
+          #dotnet test .\PostgREST.DbContext.Provider.Tests\PostgREST.DbContext.Provider.Tests.csproj -c Release 
           dotnet pack .\PostgREST.DbContext.Provider\PostgREST.DbContext.Provider.csproj -c Release -o ./packaging /p:PackageVersion=${{ env.VERSION }}
         } catch {
           Write-Error @"
@@ -46,7 +46,7 @@ jobs:
         }
       
     - name: Publish generator and endpoints to Nuget
-      if: github.ref_name == 'dev' && startsWith(github.event.head_commit.message, '[Release]')
+      if: github.ref_name == 'master' || startsWith(github.event.head_commit.message, '[Release]')
       id: publish
       run: |        
         for package in $(find . -wholename '**/packaging/*.nupkg'); do
