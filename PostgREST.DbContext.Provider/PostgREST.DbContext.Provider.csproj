@@ -11,6 +11,7 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/pedro-gilmora/EF.PostgREST.Provider</PackageProjectUrl>
     <RepositoryUrl>https://github.com/pedro-gilmora/EF.PostgREST.Provider</RepositoryUrl>
+    <Configurations>Debug;Release;Test</Configurations>
   </PropertyGroup>
 
   <ItemGroup>

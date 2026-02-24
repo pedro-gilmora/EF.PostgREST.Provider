@@ -1,21 +1,30 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
-    <LangVersion>latest</LangVersion>
-    <Nullable>enable</Nullable>
-    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
-    <IsRoslynComponent>true</IsRoslynComponent>
-    <PackageId>SourceCrafter.EF.PostgREST.Provider.Analyzers</PackageId>
-    <Authors>pedro-gilmora</Authors>
-    <Description>Roslyn analyzers and code fixers for generating PostgREST entity classes from the OpenAPI schema.</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>netstandard2.0</TargetFramework>
+		<LangVersion>latest</LangVersion>
+		<Nullable>enable</Nullable>
+		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+		<IsRoslynComponent>true</IsRoslynComponent>
+		<PackageId>SourceCrafter.EF.PostgREST.Provider.Analyzers</PackageId>
+		<Authors>pedro-gilmora</Authors>
+		<Description>Roslyn analyzers and code fixers for generating PostgREST entity classes from the OpenAPI schema.</Description>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<IncludeBuildOutput Condition="$(Configuration) == 'Release'">false</IncludeBuildOutput>
+		<PackageOutputPath>../publish</PackageOutputPath>
+		<Configurations>Debug;Release;Test</Configurations>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="PostgREST.DbContext.Provider.Tests" />
+	</ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.12.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4" PrivateAssets="all" />
-    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <PackageReference Include="System.Text.Json" Version="10.0.0" PrivateAssets="all" />
+		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+		<None Include="$(NuGetPackageRoot)\system.text.json\10.0.0\lib\netstandard2.0\System.Text.Json.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />		
   </ItemGroup>
 
   <ItemGroup>

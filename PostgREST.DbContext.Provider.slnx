@@ -1,6 +1,12 @@
 <Solution>
-  <Project Path="PostgREST.DbContext.Provider/PostgREST.DbContext.Provider.csproj" />
-  <Project Path="PostgREST.DbContext.Provider.Tests/PostgREST.DbContext.Provider.Tests.csproj" />
-  <Project Path="PostgREST.DbContext.Provider.Analyzers/PostgREST.DbContext.Provider.Analyzers.csproj" />
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="Release" />
+    <BuildType Name="Test" />
+  </Configurations>
   <Project Path="PostgREST.DbContext.Provider.Analyzers.Tests/PostgREST.DbContext.Provider.Analyzers.Tests.csproj" />
+  <Project Path="PostgREST.DbContext.Provider.Analyzers/PostgREST.DbContext.Provider.Analyzers.csproj" />
+  <Project Path="PostgREST.DbContext.Provider.PackageTesting/PostgREST.DbContext.Provider.PackageTesting.csproj" Id="21ddc7c6-38ec-49ad-9b17-73f18a9a3d20" />
+  <Project Path="PostgREST.DbContext.Provider.Tests/PostgREST.DbContext.Provider.Tests.csproj" />
+  <Project Path="PostgREST.DbContext.Provider/PostgREST.DbContext.Provider.csproj" />
 </Solution>

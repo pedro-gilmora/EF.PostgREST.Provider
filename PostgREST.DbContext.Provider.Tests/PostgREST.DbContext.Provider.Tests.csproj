@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <Configurations>Debug;Release;Test</Configurations>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\PostgREST.DbContext.Provider\PostgREST.DbContext.Provider.csproj" />
+    <ProjectReference Include="..\PostgREST.DbContext.Provider.Analyzers\PostgREST.DbContext.Provider.Analyzers.csproj" ReferenceOutputAssembly="true" OutputItemType="" />
   </ItemGroup>
 
 </Project>
