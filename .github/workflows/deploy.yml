@@ -50,7 +50,7 @@ jobs:
       if: github.ref_name == 'master'
       id: publish
       run: |        
-        for package in $(./packaging -maxdepth 1 -name '*.nupkg'); do
+        for package in $(find ./packaging -maxdepth 1 -name '*.nupkg'); do
 
             echo "Found package: $package"
 
