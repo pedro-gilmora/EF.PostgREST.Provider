@@ -1,0 +1,154 @@
+name: 'SourceCrafter.DependencyInjection: Build, Test & Deploy for .NET 10'
+
+on:
+  push:
+    branches: [ "**" ]
+
+jobs:
+  try-deliver:
+    name: '.NET 10 Build, Test & Deploy'
+    runs-on: 'ubuntu-latest'
+
+    steps:      
+    - name: Get source code
+      uses: actions/checkout@v3
+        
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: 10.0.x        
+
+    - name: Save GitHub Event Payload
+      run: |
+        created_year=$( date -d @${{ github.event.repository.created_at }} +%Y )
+        time_num=$(date +%H%M | sed 's/^0*//')  # Remove leading zeros to avoid octal interpretation
+        time_num=${time_num:-0}  # Handle case where all digits are 0
+        version=""$(( $(date --date='now' +%Y) - $created_year )).$(date +%y).$(date +%j).$(( $time_num / 5 ))""
+        echo "VERSION=${version}" >> $GITHUB_ENV
+
+        cat <<EOF > github_event.json
+        ${{ toJson(github.event) }}
+        EOF
+
+    - name: Restore, Package and Test
+      shell: pwsh
+      id: build
+      run: |
+        try {
+          .\Package.ps1 -clean false -specificVersion "${{ env.VERSION }}" -test true
+        } catch {
+          Write-Error @"
+        Restore, Package and Test errors: 
+        $($_.Exception.Message)
+        "@
+        }
+      
+    - name: Publish generator and endpoints to Nuget
+      if: github.ref_name == 'dev' && startsWith(github.event.head_commit.message, '[Release]')
+      id: publish
+      run: |        
+        for package in $(find . -wholename '**/packaging/*.nupkg'); do
+          # Execute nuget push for each package
+          output=$(dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" | awk '/: error / { print }')
+
+          if [ "${#output}" -ne 0 ]; then
+            echo -e "Restore errors:
+          $output" >> errors.log
+          fi
+        done
+
+    - name: Notify Telegram & create GitHub Release
+      if: always()
+      shell: pwsh              
+      env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      run:  |
+        # Load the event payload as JSON
+        $githubEvent = @{}          
+        if(Test-Path ./github_event.json) {
+          $githubEvent = Get-Content -Path ./github_event.json -Raw | ConvertFrom-Json
+        }
+
+        # Load errors from errors logs file
+        $errors = ""
+        if (Test-Path "./errors.log") {
+          echo "Found errors log file"
+          $errors = $( Get-Content -Path "./errors.log" )
+        }
+
+        echo "These are the errors: [$errors]"
+
+        function escape ([string] $text) 
+        {
+          return $text -replace "([_\*\[\]\(\)~``>#\+\-=|{}\.!`"'])", '\$1'
+        }
+
+        function releaseTrimming ([string] $text) 
+        {
+          return $text -replace '^\[Release\]\s*', '' -replace '"', '\"'
+        }
+
+        $isRelease = $githubEvent.head_commit.message -match '^\[Release\]\s*'
+        $headCommit = releaseTrimming $githubEvent.head_commit.message
+        $commits = [System.Collections.Stack]::new( $githubEvent.commits )
+        $failed = '${{ job.status }}' -eq 'failure'
+
+        #echo $commits
+
+        $status, $icon, $message = if ($failed -or $errors) {
+          'failed', '💥', $errors
+        } elseif ('${{ job.status }}' -eq 'success') {
+          'successfully completed', '✅', $headCommit
+        } else {
+          'cancelled', '⛔', 'User aborted the action'
+        }
+
+        $message = @"
+        🚀 *$(escape '${{ github.workflow }}')* \#${{ github.run_number }} 
+        $icon Build $status 
+        👤 *Triggered by:* [$( escape "${{ github.triggering_actor }}" )](https://github.com/$( escape "${{ github.triggering_actor }}" ))
+        🌿 *Branch:* $( escape "${{ github.ref_name }}" )
+        🔗 *Change:* *[$( $githubEvent.head_commit.id.Substring(0,8) )]($( escape $githubEvent.head_commit.url ))*
+  
+        *$(escape ( releaseTrimming $githubEvent.head_commit.message) )*$(if($commits.Count -gt 1 ) { "
+        
+        $([string]::Join("
+        ", $( $commits | 
+        Select -Skip 1 | 
+        ForEach-Object { 
+            "🔹[$($_.id.Substring(0,8))]($(escape $_.url)): $(escape ( releaseTrimming $_.message ) )
+          by [$(escape $_.author.username)]($( escape https://github.com/$($_.author.username) ))"
+        })))"
+        })$( if($errors) { "
+        
+        ``````
+        $( escape $errors.Trim() )
+        ``````" } )
+        "@
+        
+        if( $isRelease -and -not $failed ) 
+        {
+          gh release create v${{ env.VERSION }} -t "$(releaseTrimming $githubEvent.head_commit.message)" -n $(if($commits.Count -gt 1) { "| ID | Message | Author |
+          |---|---|---|
+          $([string]::Join("
+        ", $( $commits | 
+            Select -Skip 1 | 
+            ForEach-Object { 
+              "| [$($_.id.Substring(0,8))]($($_.url)) | $( releaseTrimming $_.message ) | [$( $_.author.username )]( https://github.com/$($_.author.username) ) |"
+          })))"
+          } else { "" }) 
+        }
+  
+        Write-Host $message
+
+        $uri = "https://api.telegram.org/bot${{ secrets.TGBOT_TOKEN }}/sendMessage"
+
+        $body = @{
+          chat_id = ${{ secrets.SC_CHATID }}
+          text = $message
+          parse_mode = 'MarkdownV2'
+          message_thread_id = 4
+        }
+
+        Invoke-RestMethod -Uri $uri -Method Post -Body $body
+
