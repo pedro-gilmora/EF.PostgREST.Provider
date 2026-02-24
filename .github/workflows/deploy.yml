@@ -46,10 +46,10 @@ jobs:
         }
       
     - name: Publish generator and endpoints to Nuget
-      if: github.ref_name == 'master' || startsWith(github.event.head_commit.message, '[Release]')
+      if: github.ref_name == 'master'
       id: publish
       run: |        
-        $package=$(find . -wholename '**/packaging/*.nupkg')
+        package=$(find . -wholename '**/packaging/*.nupkg')
 
         # Execute nuget push for each package
         output=$(dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" | awk '/: error / { print }')
@@ -90,7 +90,7 @@ jobs:
           return $text -replace '^\[Release\]\s*', '' -replace '"', '\"'
         }
 
-        $isRelease = ('${{ github.ref_name }}' -eq 'master') -or ($githubEvent.head_commit.message -match '^\[Release\]\s*')
+        $isRelease = '${{ github.ref_name }}' -eq 'master'
         $headCommit = releaseTrimming $githubEvent.head_commit.message
         $commits = [System.Collections.Stack]::new( $githubEvent.commits )
         $failed = '${{ job.status }}' -eq 'failure'
