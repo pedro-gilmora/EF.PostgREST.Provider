@@ -7,29 +7,24 @@ namespace PosgREST.DbContext.Provider.Core.Storage;
 /// Carries the <see cref="HttpClient"/> and configuration
 /// needed to issue HTTP requests against the PostgREST instance.
 /// </summary>
-public sealed class PostgRestDatabaseDependencies
+/// <remarks>
+/// Creates a new <see cref="PostgRestDatabaseDependencies"/> instance.
+/// </remarks>
+public sealed class PostgRestDatabaseDependencies(
+    HttpClient httpClient,
+    PostgRestDbContextOptionsExtension options)
 {
-    /// <summary>
-    /// Creates a new <see cref="PostgRestDatabaseDependencies"/> instance.
-    /// </summary>
-    public PostgRestDatabaseDependencies(
-        HttpClient httpClient,
-        PostgRestDbContextOptionsExtension options)
-    {
-        HttpClient = httpClient
-            ?? throw new ArgumentNullException(nameof(httpClient));
-        Options = options
-            ?? throw new ArgumentNullException(nameof(options));
-    }
 
     /// <summary>
     /// The <see cref="System.Net.Http.HttpClient"/> used for PostgREST HTTP requests.
     /// The consumer is responsible for configuring and managing its lifetime.
     /// </summary>
-    public HttpClient HttpClient { get; }
+    public HttpClient HttpClient { get; } = httpClient
+            ?? throw new ArgumentNullException(nameof(httpClient));
 
     /// <summary>
     /// The provider options carrying base URL, auth token, and schema.
     /// </summary>
-    public PostgRestDbContextOptionsExtension Options { get; }
+    public PostgRestDbContextOptionsExtension Options { get; } = options
+            ?? throw new ArgumentNullException(nameof(options));
 }

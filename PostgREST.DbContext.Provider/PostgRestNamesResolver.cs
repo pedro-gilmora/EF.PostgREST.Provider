@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations.Schema;
+using System.Reflection;
 using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace PosgREST.DbContext.Provider.Core;
@@ -20,13 +22,9 @@ internal static class PostgRestNamesResolver
         {
             get
             {
-                // EF Core stores the table name via the "Relational:TableName" annotation
-                // when [Table("x")] or entity.ToTable("x") is used.
-                var annotation = entityType.FindAnnotation("Relational:TableName");
-                if (annotation?.Value is string tableName && !string.IsNullOrWhiteSpace(tableName))
-                    return tableName;
-
-                return entityType.ClrType.Name.ToLowerInvariant();
+                return entityType.FindAnnotation("Relational:TableName")?.Value?.ToString()
+                    ?? entityType.ClrType.GetCustomAttribute<TableAttribute>()?.Name
+                    ?? entityType.ClrType.Name;
             }
         }
     }
@@ -41,13 +39,9 @@ internal static class PostgRestNamesResolver
         {
             get
             {
-                // EF Core stores the column name via the "Relational:ColumnName" annotation
-                // when [Column("x")] or HasColumnName("x") is used.
-                var annotation = property.FindAnnotation("Relational:ColumnName");
-                if (annotation?.Value is string columnName && !string.IsNullOrWhiteSpace(columnName))
-                    return columnName;
-
-                return property.Name.ToLowerInvariant();
+                return property.FindAnnotation("Relational:ColumnName")?.Value?.ToString()
+                    ?? property.PropertyInfo?.GetCustomAttribute<ColumnAttribute>()?.Name
+                    ?? property.Name;
 
             }
         }

@@ -26,21 +26,15 @@ namespace PosgREST.DbContext.Provider.Core.Update;
 /// returns the affected row, allowing store-generated values to be propagated back
 /// into the EF Core change tracker.
 /// </remarks>
-public sealed class PostgRestUpdatePipeline
+/// <remarks>
+/// Creates a new update pipeline.
+/// </remarks>
+public sealed class PostgRestUpdatePipeline(
+    HttpClient httpClient,
+    PostgRestDbContextOptionsExtension options)
 {
-    private readonly HttpClient _httpClient;
-    private readonly PostgRestDbContextOptionsExtension _options;
-
-    /// <summary>
-    /// Creates a new update pipeline.
-    /// </summary>
-    public PostgRestUpdatePipeline(
-        HttpClient httpClient,
-        PostgRestDbContextOptionsExtension options)
-    {
-        _httpClient = httpClient;
-        _options = options;
-    }
+    private readonly HttpClient _httpClient = httpClient;
+    private readonly PostgRestDbContextOptionsExtension _options = options;
 
     /// <summary>
     /// Executes all pending modifications synchronously.

@@ -23,4 +23,5 @@ public class Producto
     [MaxLength(250)]
     [Column("nombre")]
     public string Nombre { get; set; } = default!;
+    public virtual IList<Compra> Compras { get; internal set; }
 }

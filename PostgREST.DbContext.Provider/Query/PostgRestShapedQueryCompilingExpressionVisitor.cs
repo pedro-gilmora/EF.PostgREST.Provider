@@ -11,17 +11,11 @@ namespace PosgREST.DbContext.Provider.Core.Query;
 /// <see cref="PostgRestQueryExpression"/> into an expression tree
 /// that creates a <see cref="PostgRestQueryingEnumerable{T}"/> at runtime.
 /// </summary>
-public class PostgRestShapedQueryCompilingExpressionVisitor : ShapedQueryCompilingExpressionVisitor
+/// <remarks>
+/// Creates a new instance.
+/// </remarks>
+public class PostgRestShapedQueryCompilingExpressionVisitor(ShapedQueryCompilingExpressionVisitorDependencies dependencies, QueryCompilationContext queryCompilationContext) : ShapedQueryCompilingExpressionVisitor(dependencies, queryCompilationContext)
 {
-    /// <summary>
-    /// Creates a new instance.
-    /// </summary>
-    public PostgRestShapedQueryCompilingExpressionVisitor(
-        ShapedQueryCompilingExpressionVisitorDependencies dependencies,
-        QueryCompilationContext queryCompilationContext)
-        : base(dependencies, queryCompilationContext)
-    {
-    }
 
     /// <inheritdoc />
     protected override Expression VisitShapedQuery(ShapedQueryExpression shapedQueryExpression)
@@ -46,6 +40,12 @@ public class PostgRestShapedQueryCompilingExpressionVisitor : ShapedQueryCompili
             [queryContextParam])
             .Visit(shaperExpression);
 
+        // 4. Rewrite nested Enumerable.ToList(Queryable.Select(EntityQueryRoot, lambda))
+        //    patterns into PostgRestNestedCollectionHelper.Read<TEntity, TDto>(...) calls
+        //    so they are satisfied at runtime from the embedded JSON array on the parent row.
+        shaperExpression = new NestedCollectionRewritingVisitor(queryContextParam)
+            .Visit(shaperExpression)!;
+
         var elementType = shaperExpression.Type;
         var shaperLambda = Expression.Lambda(
             shaperExpression,
@@ -54,7 +54,7 @@ public class PostgRestShapedQueryCompilingExpressionVisitor : ShapedQueryCompili
 
         var compiledShaper = shaperLambda.Compile();
 
-        // 4. Build expression: new PostgRestQueryingEnumerable<T>(context, entityType, ...)
+        // 5. Build expression: new PostgRestQueryingEnumerable<T>(context, entityType, ...)
         var enumerableType = typeof(PostgRestQueryingEnumerable<>).MakeGenericType(elementType);
         var constructor = enumerableType.GetConstructors()[0];
 
@@ -93,6 +93,73 @@ public class PostgRestShapedQueryCompilingExpressionVisitor : ShapedQueryCompili
                 return valueBufferParam;
 
             return base.VisitExtension(node);
+        }
+    }
+
+    /// <summary>
+    /// Rewrites <c>Enumerable.ToList(Queryable.Select(Queryable.Where(EntityQueryRoot, …), lambda))</c>
+    /// into <c>PostgRestNestedCollectionHelper.Read&lt;TEntity, TDto&gt;(queryContext, entityType, propertyName, selector)</c>
+    /// so the collection is populated from the embedded JSON array on the parent row at runtime.
+    /// </summary>
+    private sealed class NestedCollectionRewritingVisitor(ParameterExpression queryContextParam) : ExpressionVisitor
+    {
+        // Enumerable.ToList<T>(IEnumerable<T>)
+        private static readonly MethodInfo _toListOpen =
+            typeof(Enumerable).GetMethods()
+                .First(m => m.Name == nameof(Enumerable.ToList) && m.GetParameters().Length == 1);
+
+        // PostgRestNestedCollectionHelper.Read<TEntity, TDto>(QueryContext, IEntityType, string, Func<TEntity,TDto>)
+        private static readonly MethodInfo _readOpen =
+            typeof(PostgRestNestedCollectionHelper).GetMethod(nameof(PostgRestNestedCollectionHelper.Read))!;
+
+        protected override Expression VisitMethodCall(MethodCallExpression node)
+        {
+            // Match: Enumerable.ToList(Queryable.Select(source, lambda))
+            if (node.Method.IsGenericMethod
+                && node.Method.GetGenericMethodDefinition() == _toListOpen
+                && node.Arguments[0] is MethodCallExpression selectCall
+                && selectCall.Method.Name == "Select")
+            {
+                // Unwrap the inner Select — strip any intermediate Where / other Queryable calls
+                // until we reach an EntityQueryRootExpression.
+                var selectSource = selectCall.Arguments[0];
+                while (selectSource is MethodCallExpression mc && selectSource is not EntityQueryRootExpression)
+                    selectSource = mc.Arguments[0];
+
+                if (selectSource is EntityQueryRootExpression root)
+                {
+                    // Retrieve the projection lambda (may be quoted)
+                    var lambdaArg = selectCall.Arguments[^1];
+                    var lambda = lambdaArg is UnaryExpression { NodeType: ExpressionType.Quote } q
+                        ? (LambdaExpression)q.Operand
+                        : (LambdaExpression)lambdaArg;
+
+                    var entityType = root.EntityType;
+                    var entityClrType = entityType.ClrType;
+                    var dtoType = lambda.ReturnType;
+
+                    // JSON property name = table name (PostgREST embedded resource key)
+                    var jsonPropName = entityType.TableName;
+
+                    // Build: PostgRestNestedCollectionHelper.Read<TEntity, TDto>(
+                    //            queryContextParam, entityTypeConst, propNameConst, selectorDelegate)
+                    var readMethod = _readOpen.MakeGenericMethod(entityClrType, dtoType);
+
+                    // Compile the selector as a delegate constant so the lambda body
+                    // (which references raw entity properties) is closed over correctly.
+                    var compiled = Expression.Constant(lambda.Compile());
+
+                    return Expression.Call(
+                        null,
+                        readMethod,
+                        queryContextParam,
+                        Expression.Constant(entityType),
+                        Expression.Constant(jsonPropName),
+                        compiled);
+                }
+            }
+
+            return base.VisitMethodCall(node);
         }
     }
 }

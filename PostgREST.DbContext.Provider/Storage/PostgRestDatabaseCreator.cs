@@ -10,23 +10,17 @@ namespace PosgREST.DbContext.Provider.Core.Storage;
 /// <see cref="CanConnect"/> / <see cref="CanConnectAsync"/> verify reachability
 /// of the PostgREST instance by issuing <c>GET /</c> (the OpenAPI root).
 /// </summary>
-public sealed class PostgRestDatabaseCreator : IDatabaseCreator
+/// <remarks>
+/// Creates a new <see cref="PostgRestDatabaseCreator"/> instance.
+/// </remarks>
+public sealed class PostgRestDatabaseCreator(
+    HttpClient httpClient,
+    PostgRestDbContextOptionsExtension options) : IDatabaseCreator
 {
-    private readonly HttpClient _httpClient;
-    private readonly PostgRestDbContextOptionsExtension _options;
-
-    /// <summary>
-    /// Creates a new <see cref="PostgRestDatabaseCreator"/> instance.
-    /// </summary>
-    public PostgRestDatabaseCreator(
-        HttpClient httpClient,
-        PostgRestDbContextOptionsExtension options)
-    {
-        _httpClient = httpClient
+    private readonly HttpClient _httpClient = httpClient
             ?? throw new ArgumentNullException(nameof(httpClient));
-        _options = options
+    private readonly PostgRestDbContextOptionsExtension _options = options
             ?? throw new ArgumentNullException(nameof(options));
-    }
 
     /// <summary>
     /// Not supported — PostgREST manages the underlying PostgreSQL schema.

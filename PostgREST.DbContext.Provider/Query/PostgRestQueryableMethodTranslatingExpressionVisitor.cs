@@ -1,9 +1,10 @@
-using System.Collections;
-using System.Linq.Expressions;
-
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.EntityFrameworkCore.Storage;
+
+using System.Collections;
+using System.Linq.Expressions;
 
 namespace PosgREST.DbContext.Provider.Core.Query;
 
@@ -19,8 +20,8 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
     QueryCompilationContext queryCompilationContext,
     bool subquery)
         : QueryableMethodTranslatingExpressionVisitor(
-            dependencies, 
-            queryCompilationContext, 
+            dependencies,
+            queryCompilationContext,
             subquery)
 {
 
@@ -242,11 +243,11 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         ShapedQueryExpression source,
         LambdaExpression selector)
     {
-        var queryExpression  = (PostgRestQueryExpression)source.QueryExpression;
-        var entityParam      = selector.Parameters[0];
+        var queryExpression = (PostgRestQueryExpression)source.QueryExpression;
+        var entityParam = selector.Parameters[0];
 
         // ── 1. Vertical filtering: collect every e.Prop access in the body ──────
-        var referencedColumns = ExtractReferencedColumns(selector.Body, entityParam);
+        var referencedColumns = ExtractReferencedColumns(selector.Body, entityParam, queryExpression.EntityType);
 
         if (referencedColumns.Count > 0)
         {
@@ -295,9 +296,10 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
     /// </summary>
     private static IReadOnlyList<string> ExtractReferencedColumns(
         Expression body,
-        ParameterExpression entityParam)
+        ParameterExpression entityParam,
+        IEntityType entityType)
     {
-        var extractor = new ColumnReferenceExtractor(entityParam);
+        var extractor = new ColumnReferenceExtractor(entityParam, entityType);
         extractor.Visit(body);
         return extractor.Columns;
     }
@@ -307,12 +309,16 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
     /// accessed directly on <see cref="_entityParam"/> (i.e. <c>e.Prop</c>).
     /// Nested projections inside <see cref="NewExpression"/> or
     /// <see cref="MemberInitExpression"/> nodes are also traversed.
+    /// Collection navigation properties projected via a nested
+    /// <c>.Select(i =&gt; …)</c> are emitted as
+    /// <c>relation(col1,col2,…)</c> to match the PostgREST embedded-resource
+    /// syntax, supporting arbitrary nesting depth.
     /// </summary>
-    private sealed class ColumnReferenceExtractor(ParameterExpression entityParam) : ExpressionVisitor
+    private sealed class ColumnReferenceExtractor(ParameterExpression entityParam, IEntityType entityType) : ExpressionVisitor
     {
         private readonly ParameterExpression _entityParam = entityParam;
 
-        /// <summary>Distinct ordered list of accessed column names (lowercase).</summary>
+        /// <summary>Distinct ordered list of accessed column/relation names (lowercase).</summary>
         public List<string> Columns { get; } = [];
 
         protected override Expression VisitMember(MemberExpression node)
@@ -320,7 +326,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             // e.PropertyName → direct column reference
             if (node.Expression == _entityParam)
             {
-                var colName = node.Member.Name.ToLowerInvariant();
+                var colName = entityType.GetProperty(node.Member.Name).ColumnName;
                 if (!Columns.Contains(colName))
                     Columns.Add(colName);
 
@@ -329,6 +335,62 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             }
 
             return base.VisitMember(node);
+        }
+
+        protected override Expression VisitMethodCall(MethodCallExpression node)
+        {
+            // Handle e.Collection.Select(i => projection)
+            // Supports both extension-method form (Enumerable.Select) and instance form.
+            if (node.Method.Name == nameof(Enumerable.Select))
+            {
+                Expression? source = null;
+                LambdaExpression? lambda = null;
+
+                // Static extension form: Enumerable.Select(source, selector)
+                if (node.Arguments.Count == 2)
+                {
+                    source = node.Arguments[0];
+
+                    while (source is not EntityQueryRootExpression && source is MethodCallExpression { Arguments: [{ } _s, ..] })
+                        source = _s;
+
+                    lambda = node.Arguments[1] is UnaryExpression unary
+                        ? unary.Operand as LambdaExpression
+                        : node.Arguments[1] as LambdaExpression;
+
+                    if (source is EntityQueryRootExpression { EntityType :{ TableName: string sourceName } entityType }
+                        && lambda is not null)
+                    {
+                        var innerParam = lambda.Parameters[0];
+
+                        // Recursively extract columns from the nested projection.
+                        // Because ColumnReferenceExtractor handles Select itself,
+                        // arbitrarily deep nesting is resolved automatically.
+                        var innerExtractor = new ColumnReferenceExtractor(innerParam, entityType);
+
+                        // Capture the visited body so deeper nesting is rewritten and the
+                        // resulting lambda remains fully reducible (no dangling sub-trees).
+                        var reducedBody = innerExtractor.Visit(lambda.Body);
+
+                        var entry = innerExtractor.Columns.Count > 0
+                            ? $"{sourceName}({string.Join(",", innerExtractor.Columns)})"
+                            : sourceName;
+
+                        if (!Columns.Contains(entry))
+                            Columns.Add(entry);
+
+                        // Rebuild the lambda with the visited (reducible) body so any
+                        // further expression rewriting by EF Core can traverse the tree
+                        // without encountering unprocessed sub-expressions.
+                        var reducedLambda = Expression.Lambda(reducedBody, lambda.Parameters);
+                        var newArgs = node.Arguments.ToArray();
+                        newArgs[^1] = reducedLambda;
+                        return node.Update(node.Object, newArgs);
+                    }
+                }
+            }
+
+            return base.VisitMethodCall(node);
         }
     }
 

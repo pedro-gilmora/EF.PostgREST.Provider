@@ -7,24 +7,17 @@ namespace PosgREST.DbContext.Provider.Core.Query;
 /// Factory that creates <see cref="PostgRestQueryContext"/> instances
 /// for query execution.
 /// </summary>
-public class PostgRestQueryContextFactory : IQueryContextFactory
+/// <remarks>
+/// Creates a new factory instance.
+/// </remarks>
+public class PostgRestQueryContextFactory(
+    QueryContextDependencies dependencies,
+    HttpClient httpClient,
+    PostgRestDbContextOptionsExtension options) : IQueryContextFactory
 {
-    private readonly QueryContextDependencies _dependencies;
-    private readonly HttpClient _httpClient;
-    private readonly PostgRestDbContextOptionsExtension _options;
-
-    /// <summary>
-    /// Creates a new factory instance.
-    /// </summary>
-    public PostgRestQueryContextFactory(
-        QueryContextDependencies dependencies,
-        HttpClient httpClient,
-        PostgRestDbContextOptionsExtension options)
-    {
-        _dependencies = dependencies ?? throw new ArgumentNullException(nameof(dependencies));
-        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        _options = options ?? throw new ArgumentNullException(nameof(options));
-    }
+    private readonly QueryContextDependencies _dependencies = dependencies ?? throw new ArgumentNullException(nameof(dependencies));
+    private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+    private readonly PostgRestDbContextOptionsExtension _options = options ?? throw new ArgumentNullException(nameof(options));
 
     /// <inheritdoc />
     public QueryContext Create()

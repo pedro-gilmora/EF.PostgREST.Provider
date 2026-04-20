@@ -17,7 +17,10 @@ namespace PosgREST.DbContext.Provider.Core.Storage;
 /// EF Core's built-in JSON reader/writer infrastructure. This covers the
 /// types listed in the <c>claude.md</c> type-mapping table.
 /// </remarks>
-public class PostgRestTypeMappingSource : TypeMappingSource
+/// <remarks>
+/// Creates a new <see cref="PostgRestTypeMappingSource"/>.
+/// </remarks>
+public class PostgRestTypeMappingSource(TypeMappingSourceDependencies dependencies) : TypeMappingSource(dependencies)
 {
     private static readonly ConcurrentDictionary<Type, PostgRestTypeMapping?> _mappingCache = new();
 
@@ -70,14 +73,6 @@ public class PostgRestTypeMappingSource : TypeMappingSource
         typeof(byte[]),
         typeof(JsonElement),
     ];
-
-    /// <summary>
-    /// Creates a new <see cref="PostgRestTypeMappingSource"/>.
-    /// </summary>
-    public PostgRestTypeMappingSource(TypeMappingSourceDependencies dependencies)
-        : base(dependencies)
-    {
-    }
 
     /// <inheritdoc />
     public override CoreTypeMapping? FindMapping(Type type)

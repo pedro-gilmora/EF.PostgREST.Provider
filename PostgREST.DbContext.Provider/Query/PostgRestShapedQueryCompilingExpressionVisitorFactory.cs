@@ -5,19 +5,14 @@ namespace PosgREST.DbContext.Provider.Core.Query;
 /// <summary>
 /// Factory for creating <see cref="PostgRestShapedQueryCompilingExpressionVisitor"/> instances.
 /// </summary>
-public class PostgRestShapedQueryCompilingExpressionVisitorFactory
-    : IShapedQueryCompilingExpressionVisitorFactory
+/// <remarks>
+/// Creates a new factory instance.
+/// </remarks>
+public class PostgRestShapedQueryCompilingExpressionVisitorFactory(
+    ShapedQueryCompilingExpressionVisitorDependencies dependencies)
+        : IShapedQueryCompilingExpressionVisitorFactory
 {
-    private readonly ShapedQueryCompilingExpressionVisitorDependencies _dependencies;
-
-    /// <summary>
-    /// Creates a new factory instance.
-    /// </summary>
-    public PostgRestShapedQueryCompilingExpressionVisitorFactory(
-        ShapedQueryCompilingExpressionVisitorDependencies dependencies)
-    {
-        _dependencies = dependencies ?? throw new ArgumentNullException(nameof(dependencies));
-    }
+    private readonly ShapedQueryCompilingExpressionVisitorDependencies _dependencies = dependencies ?? throw new ArgumentNullException(nameof(dependencies));
 
     /// <inheritdoc />
     public ShapedQueryCompilingExpressionVisitor Create(QueryCompilationContext queryCompilationContext)

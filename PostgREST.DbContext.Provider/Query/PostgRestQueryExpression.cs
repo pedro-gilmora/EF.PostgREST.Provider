@@ -10,24 +10,19 @@ namespace PosgREST.DbContext.Provider.Core.Query;
 /// Captures the target table, filters, ordering, offset, and limit
 /// that will be translated into a PostgREST <c>GET</c> request URL.
 /// </summary>
-public sealed class PostgRestQueryExpression : Expression
+/// <remarks>
+/// Creates a new query expression targeting the specified entity type.
+/// The table name is resolved from <c>[Table]</c> / <c>ToTable()</c>
+/// configuration, falling back to the CLR type name in lowercase.
+/// </remarks>
+public sealed class PostgRestQueryExpression(IEntityType entityType) : Expression
 {
-    /// <summary>
-    /// Creates a new query expression targeting the specified entity type.
-    /// The table name is resolved from <c>[Table]</c> / <c>ToTable()</c>
-    /// configuration, falling back to the CLR type name in lowercase.
-    /// </summary>
-    public PostgRestQueryExpression(IEntityType entityType)
-    {
-        EntityType = entityType;
-        TableName = entityType.TableName;
-    }
 
     /// <summary>The entity type this query targets.</summary>
-    public IEntityType EntityType { get; }
+    public IEntityType EntityType { get; } = entityType;
 
     /// <summary>The PostgREST endpoint table name.</summary>
-    public string TableName { get; set; }
+    public string TableName { get; set; } = entityType.TableName;
 
     /// <summary>Horizontal filters (<c>?column=op.value</c>).</summary>
     public List<PostgRestFilter> Filters { get; } = [];

@@ -7,40 +7,31 @@ namespace PosgREST.DbContext.Provider.Core;
 /// Captures the structured error information returned by PostgREST in its JSON
 /// error body: <c>message</c>, <c>details</c>, <c>hint</c>, and <c>code</c>.
 /// </summary>
-public sealed class PostgRestException : Exception
+/// <remarks>
+/// Creates a new <see cref="PostgRestException"/>.
+/// </remarks>
+public sealed class PostgRestException(
+    int statusCode,
+    string? postgRestMessage,
+    string? details,
+    string? hint,
+    string? code) : Exception(FormatMessage(statusCode, postgRestMessage, details, hint, code))
 {
-    /// <summary>
-    /// Creates a new <see cref="PostgRestException"/>.
-    /// </summary>
-    public PostgRestException(
-        int statusCode,
-        string? postgRestMessage,
-        string? details,
-        string? hint,
-        string? code)
-        : base(FormatMessage(statusCode, postgRestMessage, details, hint, code))
-    {
-        StatusCode = statusCode;
-        PostgRestMessage = postgRestMessage;
-        Details = details;
-        Hint = hint;
-        PostgresCode = code;
-    }
 
     /// <summary>The HTTP status code returned by PostgREST.</summary>
-    public int StatusCode { get; }
+    public int StatusCode { get; } = statusCode;
 
     /// <summary>The PostgREST error message.</summary>
-    public string? PostgRestMessage { get; }
+    public string? PostgRestMessage { get; } = postgRestMessage;
 
     /// <summary>Additional error details from PostgREST.</summary>
-    public string? Details { get; }
+    public string? Details { get; } = details;
 
     /// <summary>A hint for resolving the error.</summary>
-    public string? Hint { get; }
+    public string? Hint { get; } = hint;
 
     /// <summary>The PostgreSQL error code (e.g., <c>23505</c> for unique violation).</summary>
-    public string? PostgresCode { get; }
+    public string? PostgresCode { get; } = code;
 
     /// <summary>
     /// Attempts to parse a PostgREST JSON error body and throws a

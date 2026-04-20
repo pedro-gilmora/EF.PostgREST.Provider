@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+
 using PosgREST.DbContext.Provider.Console.Models;
+using PosgREST.DbContext.Provider.Core;
 using PosgREST.DbContext.Provider.Core.Extensions;
 
 namespace PosgREST.DbContext.Provider.Console;
@@ -8,6 +10,8 @@ namespace PosgREST.DbContext.Provider.Console;
 /// DbContext targeting the PostgREST instance at the configured base URL.
 /// Exposes the <c>categoria</c>, <c>producto</c>, and <c>persona</c> tables from the real schema.
 /// </summary>
+
+[SchemaDesign("http://localhost:3000")]
 public class AppDbContext : Microsoft.EntityFrameworkCore.DbContext
 {
     private readonly string _baseUrl;

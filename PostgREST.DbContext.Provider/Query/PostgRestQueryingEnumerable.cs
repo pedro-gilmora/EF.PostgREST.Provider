@@ -12,51 +12,35 @@ namespace PosgREST.DbContext.Provider.Core.Query;
 /// executes a PostgREST <c>GET</c> request and materializes the JSON response
 /// into entity instances using the provided shaper delegate.
 /// </summary>
-public sealed class PostgRestQueryingEnumerable<T> : IEnumerable<T>, IAsyncEnumerable<T>, IQueryingEnumerable
+/// <remarks>
+/// Creates a new querying enumerable.
+/// </remarks>
+public sealed class PostgRestQueryingEnumerable<T>(
+    PostgRestQueryContext queryContext,
+    IEntityType entityType,
+    string tableName,
+    IReadOnlyList<PostgRestFilter> filters,
+    IReadOnlyList<PostgRestOrFilter> orFilters,
+    IReadOnlyList<string> selectColumns,
+    IReadOnlyList<PostgRestOrderByClause> orderByClauses,
+    int? offset,
+    string? offsetParameterName,
+    int? limit,
+    string? limitParameterName,
+    Func<QueryContext, ValueBuffer, T> shaper) : IEnumerable<T>, IAsyncEnumerable<T>, IQueryingEnumerable
 {
-    private readonly PostgRestQueryContext _queryContext;
-    private readonly IEntityType _entityType;
-    private readonly string _tableName;
-    private readonly IReadOnlyList<PostgRestFilter> _filters;
-    private readonly IReadOnlyList<PostgRestOrFilter> _orFilters;
-    private readonly IReadOnlyList<string> _selectColumns;
-    private readonly IReadOnlyList<PostgRestOrderByClause> _orderByClauses;
-    private readonly int? _offset;
-    private readonly string? _offsetParameterName;
-    private readonly int? _limit;
-    private readonly string? _limitParameterName;
-    private readonly Func<QueryContext, ValueBuffer, T> _shaper;
-
-    /// <summary>
-    /// Creates a new querying enumerable.
-    /// </summary>
-    public PostgRestQueryingEnumerable(
-        PostgRestQueryContext queryContext,
-        IEntityType entityType,
-        string tableName,
-        IReadOnlyList<PostgRestFilter> filters,
-        IReadOnlyList<PostgRestOrFilter> orFilters,
-        IReadOnlyList<string> selectColumns,
-        IReadOnlyList<PostgRestOrderByClause> orderByClauses,
-        int? offset,
-        string? offsetParameterName,
-        int? limit,
-        string? limitParameterName,
-        Func<QueryContext, ValueBuffer, T> shaper)
-    {
-        _queryContext = queryContext;
-        _entityType = entityType;
-        _tableName = tableName;
-        _filters = filters;
-        _orFilters = orFilters;
-        _selectColumns = selectColumns;
-        _orderByClauses = orderByClauses;
-        _offset = offset;
-        _offsetParameterName = offsetParameterName;
-        _limit = limit;
-        _limitParameterName = limitParameterName;
-        _shaper = shaper;
-    }
+    private readonly PostgRestQueryContext _queryContext = queryContext;
+    private readonly IEntityType _entityType = entityType;
+    private readonly string _tableName = tableName;
+    private readonly IReadOnlyList<PostgRestFilter> _filters = filters;
+    private readonly IReadOnlyList<PostgRestOrFilter> _orFilters = orFilters;
+    private readonly IReadOnlyList<string> _selectColumns = selectColumns;
+    private readonly IReadOnlyList<PostgRestOrderByClause> _orderByClauses = orderByClauses;
+    private readonly int? _offset = offset;
+    private readonly string? _offsetParameterName = offsetParameterName;
+    private readonly int? _limit = limit;
+    private readonly string? _limitParameterName = limitParameterName;
+    private readonly Func<QueryContext, ValueBuffer, T> _shaper = shaper;
 
     /// <inheritdoc />
     public IEnumerator<T> GetEnumerator() => new Enumerator(this);
@@ -151,36 +135,7 @@ public sealed class PostgRestQueryingEnumerable<T> : IEnumerable<T>, IAsyncEnume
     }
 
     private static object? ConvertJsonValue(JsonElement element, Type targetType)
-    {
-        if (element.ValueKind == JsonValueKind.Null)
-            return null;
-
-        var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
-
-        if (underlying == typeof(int)) return element.GetInt32();
-        if (underlying == typeof(long)) return element.GetInt64();
-        if (underlying == typeof(short)) return element.GetInt16();
-        if (underlying == typeof(byte)) return element.GetByte();
-        if (underlying == typeof(bool)) return element.GetBoolean();
-        if (underlying == typeof(string)) return element.GetString();
-        if (underlying == typeof(decimal)) return element.GetDecimal();
-        if (underlying == typeof(double)) return element.GetDouble();
-        if (underlying == typeof(float)) return element.GetSingle();
-        if (underlying == typeof(Guid)) return element.GetGuid();
-        if (underlying == typeof(DateTime)) return element.GetDateTime();
-        if (underlying == typeof(DateTimeOffset)) return element.GetDateTimeOffset();
-        if (underlying == typeof(DateOnly) && element.GetString() is { } dateStr)
-            return DateOnly.Parse(dateStr);
-        if (underlying == typeof(TimeOnly) && element.GetString() is { } timeStr)
-            return TimeOnly.Parse(timeStr);
-        if (underlying == typeof(byte[]))
-            return element.GetBytesFromBase64();
-        if (underlying == typeof(JsonElement))
-            return element.Clone();
-
-        // Fallback: try to deserialize
-        return JsonSerializer.Deserialize(element.GetRawText(), targetType);
-    }
+        => PostgRestNestedCollectionHelper.ConvertJsonValue(element, targetType);
 
     /// <summary>
     /// Applies common HTTP headers (Accept, Authorization, Schema profiles)
@@ -197,14 +152,12 @@ public sealed class PostgRestQueryingEnumerable<T> : IEnumerable<T>, IAsyncEnume
             request.Headers.TryAddWithoutValidation("Accept-Profile", schema);
     }
 
-    private sealed class Enumerator : IEnumerator<T>
+    private sealed class Enumerator(PostgRestQueryingEnumerable<T> enumerable) : IEnumerator<T>
     {
-        private readonly PostgRestQueryingEnumerable<T> _enumerable;
+        private readonly PostgRestQueryingEnumerable<T> _enumerable = enumerable;
         private IReadOnlyList<JsonElement>? _results;
         private IReadOnlyList<IProperty>? _properties;
         private int _index = -1;
-
-        public Enumerator(PostgRestQueryingEnumerable<T> enumerable) => _enumerable = enumerable;
 
         public T Current { get; private set; } = default!;
         object IEnumerator.Current => Current!;
@@ -220,7 +173,9 @@ public sealed class PostgRestQueryingEnumerable<T> : IEnumerable<T>, IAsyncEnume
 
             if (++_index < _results.Count)
             {
-                var valueBuffer = _enumerable.CreateValueBuffer(_results[_index], _properties!);
+                var element = _results[_index];
+                _enumerable._queryContext.CurrentJsonElement = element;
+                var valueBuffer = _enumerable.CreateValueBuffer(element, _properties!);
                 Current = _enumerable._shaper(_enumerable._queryContext, valueBuffer);
                 return true;
             }
@@ -252,21 +207,15 @@ public sealed class PostgRestQueryingEnumerable<T> : IEnumerable<T>, IAsyncEnume
         }
     }
 
-    private sealed class AsyncEnumerator : IAsyncEnumerator<T>
+    private sealed class AsyncEnumerator(
+        PostgRestQueryingEnumerable<T> enumerable,
+        CancellationToken cancellationToken) : IAsyncEnumerator<T>
     {
-        private readonly PostgRestQueryingEnumerable<T> _enumerable;
-        private readonly CancellationToken _cancellationToken;
+        private readonly PostgRestQueryingEnumerable<T> _enumerable = enumerable;
+        private readonly CancellationToken _cancellationToken = cancellationToken;
         private IReadOnlyList<JsonElement>? _results;
         private IReadOnlyList<IProperty>? _properties;
         private int _index = -1;
-
-        public AsyncEnumerator(
-            PostgRestQueryingEnumerable<T> enumerable,
-            CancellationToken cancellationToken)
-        {
-            _enumerable = enumerable;
-            _cancellationToken = cancellationToken;
-        }
 
         public T Current { get; private set; } = default!;
 
@@ -281,7 +230,9 @@ public sealed class PostgRestQueryingEnumerable<T> : IEnumerable<T>, IAsyncEnume
 
             if (++_index < _results.Count)
             {
-                var valueBuffer = _enumerable.CreateValueBuffer(_results[_index], _properties!);
+                var element = _results[_index];
+                _enumerable._queryContext.CurrentJsonElement = element;
+                var valueBuffer = _enumerable.CreateValueBuffer(element, _properties!);
                 Current = _enumerable._shaper(_enumerable._queryContext, valueBuffer);
                 return true;
             }
