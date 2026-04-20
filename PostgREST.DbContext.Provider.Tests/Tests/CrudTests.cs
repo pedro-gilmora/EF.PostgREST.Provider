@@ -94,23 +94,20 @@ public class CrudTests
         {
             await using var db = new AppDbContext(BaseUrl);
             var cat = await db.Categorias.FirstOrDefaultAsync(c => c.Id == insertedId);
-            Assert.NotNull(cat);
+            var newDate = $"xUnit-Updated-{DateTime.UtcNow:HHmmss}";
 
-            cat.Nombre = $"xUnit-Updated-{DateTime.UtcNow:HHmmss}";
-            var affected = await db.SaveChangesAsync();
+            var update = await db.Categorias
+                            .Where(c => c.Id == insertedId)
+                            .ExecuteUpdateAsync(p => p.SetProperty(c => c.Nombre, newDate));
 
-            Assert.Equal(1, affected);
-            Assert.StartsWith("xUnit-Updated-", cat.Nombre);
+            Assert.Equal(1, update);
+            Assert.StartsWith("xUnit-Updated-", cat!.Nombre);
         }
 
         // ── 6. DELETE ─────────────────────────────────────────────────────────
         {
             await using var db = new AppDbContext(BaseUrl);
-            var cat = await db.Categorias.FirstOrDefaultAsync(c => c.Id == insertedId);
-            Assert.NotNull(cat);
-
-            db.Categorias.Remove(cat);
-            var affected = await db.SaveChangesAsync();
+            var affected = await db.Categorias.Where(c => c.Id == insertedId).ExecuteDeleteAsync();
 
             Assert.Equal(1, affected);
         }

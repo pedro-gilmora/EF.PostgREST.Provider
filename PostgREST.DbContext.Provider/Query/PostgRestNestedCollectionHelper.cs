@@ -58,10 +58,7 @@ public static class PostgRestNestedCollectionHelper
         foreach (var prop in properties)
         {
             // Resolve the JSON key — respects [Column] / HasColumnName()
-            var annotation = prop.FindAnnotation("Relational:ColumnName");
-            var columnName = annotation?.Value is string cn && !string.IsNullOrWhiteSpace(cn)
-                ? cn
-                : prop.Name.ToLowerInvariant();
+            var columnName = prop.ColumnName;
 
             if (!element.TryGetProperty(columnName, out var jsonProp)
                 || jsonProp.ValueKind == JsonValueKind.Undefined)

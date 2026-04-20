@@ -8,6 +8,7 @@ public sealed class PostgRestFilter
 {
     /// <summary>The PostgREST column name to filter on.</summary>
     public required string Column { get; init; }
+    public required string PropertyName { get; init; }
 
     /// <summary>The comparison operator.</summary>
     public required PostgRestFilterOperator Operator { get; init; }

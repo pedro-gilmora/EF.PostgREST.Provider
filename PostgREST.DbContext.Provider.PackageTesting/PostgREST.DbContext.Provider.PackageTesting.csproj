@@ -10,7 +10,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="SourceCrafter.EF.PostgREST.Provider" Version="0.26.55.151" />
 		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
 		<PackageReference Include="xunit" Version="2.9.0" />
 		<PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
@@ -22,12 +21,12 @@
 	<PropertyGroup Condition="'$(Configuration)' == 'Test'">
 		<UseTestAnalyzer>true</UseTestAnalyzer>
 	</PropertyGroup>
-
-	<ItemGroup Condition="'$(UseTestAnalyzer)' == 'true'">
-		<PackageReference Include="SourceCrafter.EF.PostgREST.Provider.Analyzers" Version="1.0.0" />
-	</ItemGroup>
 	<ItemGroup Condition="'$(UseTestAnalyzer)' != 'true'">
 		<PackageReference Include="SourceCrafter.EF.PostgREST.Provider.Analyzers" Version="0.26.55.151" />
+	</ItemGroup>
+	<ItemGroup>
+	  <ProjectReference Include="..\PostgREST.DbContext.Provider.Analyzers\PostgREST.DbContext.Provider.Analyzers.csproj" OutputItemType="analyzer"/>
+	  <ProjectReference Include="..\PostgREST.DbContext.Provider\PostgREST.DbContext.Provider.csproj" />
 	</ItemGroup>
 
 </Project>

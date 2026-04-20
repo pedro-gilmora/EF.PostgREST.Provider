@@ -1,6 +1,13 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Internal;
+using Microsoft.EntityFrameworkCore.Query;
+
 using PosgREST.DbContext.Provider.Core.Infrastructure;
+
+using System.Linq.Expressions;
 
 namespace PosgREST.DbContext.Provider.Core.Extensions;
 

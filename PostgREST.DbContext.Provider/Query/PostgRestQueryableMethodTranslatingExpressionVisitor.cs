@@ -4,7 +4,10 @@ using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.EntityFrameworkCore.Storage;
 
 using System.Collections;
+using System.Data.Common;
 using System.Linq.Expressions;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 
 namespace PosgREST.DbContext.Provider.Core.Query;
 
@@ -70,7 +73,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
     {
         var queryExpression = (PostgRestQueryExpression)source.QueryExpression;
 
-        if (TryExtractColumnName(keySelector.Body, keySelector.Parameters[0], out var column))
+        if (TryExtractPropertyName(keySelector.Body, keySelector.Parameters[0], out var propName) && queryExpression.EntityType.GetProperty(propName)?.ColumnName is { } column)
         {
             queryExpression.ClearOrderBy();
             queryExpression.AddOrderBy(new PostgRestOrderByClause(column, ascending));
@@ -88,7 +91,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
     {
         var queryExpression = (PostgRestQueryExpression)source.QueryExpression;
 
-        if (TryExtractColumnName(keySelector.Body, keySelector.Parameters[0], out var column))
+        if (TryExtractPropertyName(keySelector.Body, keySelector.Parameters[0], out var propName) && queryExpression.EntityType.GetProperty(propName)?.ColumnName is { } column)
         {
             queryExpression.AddOrderBy(new PostgRestOrderByClause(column, ascending));
             return source;
@@ -487,6 +490,177 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         LambdaExpression resultSelector) => null;
 
     /// <inheritdoc />
+    protected override Expression? TranslateExecuteDelete(ShapedQueryExpression source)
+    {
+        var queryExpression = (PostgRestQueryExpression)source.QueryExpression;
+
+        var filtersConstant = Expression.Constant(
+            queryExpression.Filters.ToList(),
+            typeof(IReadOnlyList<PostgRestFilter>));
+
+        var entitTypeConstant = Expression.Constant(
+            queryExpression.EntityType,
+            typeof(IEntityType));
+
+        var orFiltersConstant = Expression.Constant(
+            queryExpression.OrFilters.ToList(),
+            typeof(IReadOnlyList<PostgRestOrFilter>));
+
+        if (QueryCompilationContext.IsAsync)
+        {
+            var executeAsyncMethod = typeof(PostgRestBulkDeleteExecutor)
+                .GetMethod(nameof(PostgRestBulkDeleteExecutor.ExecuteAsync))!;
+
+            return Expression.Call(
+                executeAsyncMethod,
+                QueryCompilationContext.QueryContextParameter,
+                Expression.Constant(queryExpression.TableName),
+                filtersConstant,
+                orFiltersConstant,
+                entitTypeConstant);
+        }
+        else
+        {
+            var executeMethod = typeof(PostgRestBulkDeleteExecutor)
+                .GetMethod(nameof(PostgRestBulkDeleteExecutor.Execute))!;
+
+            return Expression.Call(
+                executeMethod,
+                QueryCompilationContext.QueryContextParameter,
+                Expression.Constant(queryExpression.TableName),
+                filtersConstant,
+                orFiltersConstant,
+                entitTypeConstant);
+        }
+    }
+
+    /// <inheritdoc />
+    protected override Expression? TranslateExecuteUpdate(
+        ShapedQueryExpression source,
+        IReadOnlyList<ExecuteUpdateSetter> setters)
+    {
+        var queryExpression = (PostgRestQueryExpression)source.QueryExpression;
+
+        // ── Resolve each setter to (columnName, propertyName, value/paramName) ────
+        var resolvedSetters =
+            new List<(string Column, string PropertyName, object? Value, string? ParameterName, bool IsParameter)>(setters.Count);
+
+        foreach (var setter in setters)
+        {
+            // PropertySelector is a lambda like: e => e.Name
+            var selectorBody = setter.PropertySelector.Body;
+
+            if (!TryExtractColumnNameFromType(
+                    selectorBody,
+                    setter.PropertySelector.Parameters[0],
+                    queryExpression.EntityType,
+                    out var columnName,
+                    out var propertyName))
+            {
+                AddTranslationErrorDetails(
+                    $"ExecuteUpdate: could not resolve property selector '{selectorBody}' to a column name.");
+                return null;
+            }
+
+            // ValueExpression is the new value — constant or query parameter
+            if (!TryExtractValue(
+                    setter.ValueExpression,
+                    out var value,
+                    out var paramName,
+                    out var isParam))
+            {
+                AddTranslationErrorDetails(
+                    $"ExecuteUpdate: could not resolve value expression '{setter.ValueExpression}' for column '{columnName}'.");
+                return null;
+            }
+
+            resolvedSetters.Add((columnName, propertyName, value, paramName, isParam));
+        }
+
+        // ── Build the expression tree that will be called at runtime ─────────
+        //
+        //   PostgRestBulkUpdateExecutor.Execute(
+        //       queryContext,
+        //       tableName,
+        //       filters,
+        //       orFilters,
+        //       setters)
+        //
+        var entityTypeConstant = Expression.Constant(queryExpression.EntityType);
+
+        var filtersConstant = Expression.Constant(
+            queryExpression.Filters.ToList(),
+            typeof(IReadOnlyList<PostgRestFilter>));
+
+        var orFiltersConstant = Expression.Constant(
+            queryExpression.OrFilters.ToList(),
+            typeof(IReadOnlyList<PostgRestOrFilter>));
+
+        var settersConstant = Expression.Constant(
+            resolvedSetters,
+            typeof(IReadOnlyList<(string, string, object?, string?, bool)>));
+
+        // EF Core requires the returned expression type to match the execution path:
+        //   • ExecuteUpdate      → Expression returning int
+        //   • ExecuteUpdateAsync → Expression returning Task<int>
+        if (QueryCompilationContext.IsAsync)
+        {
+            var executeAsyncMethod = typeof(PostgRestBulkUpdateExecutor)
+                .GetMethod(nameof(PostgRestBulkUpdateExecutor.ExecuteAsync))!;
+
+            return Expression.Call(
+                executeAsyncMethod,
+                QueryCompilationContext.QueryContextParameter,
+                Expression.Constant(queryExpression.TableName),
+                entityTypeConstant,
+                filtersConstant,
+                orFiltersConstant,
+                settersConstant);
+        }
+        else
+        {
+            var executeMethod = typeof(PostgRestBulkUpdateExecutor)
+                .GetMethod(nameof(PostgRestBulkUpdateExecutor.Execute))!;
+
+            return Expression.Call(
+                executeMethod,
+                QueryCompilationContext.QueryContextParameter,
+                Expression.Constant(queryExpression.TableName),
+                entityTypeConstant,
+                filtersConstant,
+                orFiltersConstant,
+                settersConstant);
+        }
+    }
+
+    /// <summary>
+    /// Extracts a PostgREST column name from a property-selector body (e.g. <c>e.Name</c>),
+    /// using EF Core metadata to resolve the actual column name.
+    /// </summary>
+    private static bool TryExtractColumnNameFromType(
+        Expression selectorBody,
+        ParameterExpression entityParam,
+        IEntityType entityType,
+        out string columnName,
+        out string propertyName)
+    {
+        columnName = null!;
+        propertyName = null!;
+
+        if (selectorBody is MemberExpression { Expression: { } memberTarget } memberExpr
+            && memberTarget == entityParam)
+        {
+            if (entityType.FindProperty(memberExpr.Member.Name) is not { } property)
+                return false;
+
+            columnName = property.ColumnName;   // C# 14 extension from PostgRestNamesResolver
+            propertyName = property.Name;        // CLR property name — no extension needed
+            return true;
+        }
+
+        return false;
+    }
+    /// <inheritdoc />
     protected override ShapedQueryExpression? TranslateMax(
         ShapedQueryExpression source,
         LambdaExpression? selector,
@@ -559,7 +733,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         if (expression is BinaryExpression { NodeType: ExpressionType.OrElse } orExpr)
         {
             var branches = new List<PostgRestFilter>();
-            if (TryFlattenOrBranches(orExpr, entityParam, branches))
+            if (TryFlattenOrBranches(queryExpression.EntityType, orExpr, entityParam, branches))
             {
                 queryExpression.AddOrFilter(new PostgRestOrFilter { Branches = branches });
                 return true;
@@ -577,13 +751,13 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         if (expression is BinaryExpression binary)
         {
             // Null equality: e.Col == null → is.null / e.Col != null → not.is.null
-            if (TryExtractNullCheck(binary, entityParam, out var nullFilter))
+            if (TryExtractNullCheck(queryExpression.EntityType, binary, entityParam, out var nullFilter))
             {
                 queryExpression.AddFilter(nullFilter);
                 return true;
             }
 
-            if (TryExtractBinaryFilter(binary, entityParam, out var filter))
+            if (TryExtractBinaryFilter(queryExpression.EntityType, binary, entityParam, out var filter))
             {
                 queryExpression.AddFilter(filter);
                 return true;
@@ -592,7 +766,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
         // Handle method calls: Contains, StartsWith, EndsWith, List.Contains
         if (expression is MethodCallExpression methodCall
-            && TryExtractMethodCallFilter(methodCall, entityParam, out var mcFilter))
+            && TryExtractMethodCallFilter(queryExpression.EntityType, methodCall, entityParam, out var mcFilter))
         {
             queryExpression.AddFilter(mcFilter);
             return true;
@@ -600,11 +774,12 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
         // Handle bare boolean member: e.Done → ?done=is.true
         if (expression is MemberExpression member
-            && TryExtractColumnName(member, entityParam, out var boolCol)
+            && TryExtractPropertyName(member, entityParam, out var propName) && queryExpression.EntityType.GetProperty(propName)?.ColumnName is { } boolCol
             && member.Type == typeof(bool))
         {
             queryExpression.AddFilter(new PostgRestFilter
             {
+                PropertyName = propName,
                 Column = boolCol,
                 Operator = PostgRestFilterOperator.Is,
                 Value = true
@@ -625,12 +800,13 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
     {
         // !e.Done → ?done=is.false
         if (operand is MemberExpression member
-            && TryExtractColumnName(member, entityParam, out var boolCol)
+            && TryExtractPropertyName(member, entityParam, out var propName) && queryExpression.EntityType.GetProperty(propName)?.ColumnName is { } column
             && member.Type == typeof(bool))
         {
             queryExpression.AddFilter(new PostgRestFilter
             {
-                Column = boolCol,
+                PropertyName = propName,
+                Column = column,
                 Operator = PostgRestFilterOperator.Is,
                 Value = false
             });
@@ -639,10 +815,11 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
         // !(e.Col == value) → not.eq.value
         if (operand is BinaryExpression binary
-            && TryExtractBinaryFilter(binary, entityParam, out var filter))
+            && TryExtractBinaryFilter(queryExpression.EntityType, binary, entityParam, out var filter))
         {
             queryExpression.AddFilter(new PostgRestFilter
             {
+                PropertyName = filter.PropertyName,
                 Column = filter.Column,
                 Operator = filter.Operator,
                 Negate = true,
@@ -655,10 +832,11 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
         // !(e.Name.Contains("x")) → not.like.*x*
         if (operand is MethodCallExpression methodCall
-            && TryExtractMethodCallFilter(methodCall, entityParam, out var mcFilter))
+            && TryExtractMethodCallFilter(queryExpression.EntityType, methodCall, entityParam, out var mcFilter))
         {
             queryExpression.AddFilter(new PostgRestFilter
             {
+                PropertyName = mcFilter.PropertyName,
                 Column = mcFilter.Column,
                 Operator = mcFilter.Operator,
                 Negate = true,
@@ -676,25 +854,26 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
     /// Flattens nested OR expressions into a list of filter branches.
     /// </summary>
     private static bool TryFlattenOrBranches(
+        IEntityType entityType,
         Expression expression,
         ParameterExpression entityParam,
         List<PostgRestFilter> branches)
     {
         if (expression is BinaryExpression { NodeType: ExpressionType.OrElse } orExpr)
         {
-            return TryFlattenOrBranches(orExpr.Left, entityParam, branches)
-                && TryFlattenOrBranches(orExpr.Right, entityParam, branches);
+            return TryFlattenOrBranches(entityType, orExpr.Left, entityParam, branches)
+                && TryFlattenOrBranches(entityType, orExpr.Right, entityParam, branches);
         }
 
         if (expression is BinaryExpression binary
-            && TryExtractBinaryFilter(binary, entityParam, out var filter))
+            && TryExtractBinaryFilter(entityType, binary, entityParam, out var filter))
         {
             branches.Add(filter);
             return true;
         }
 
         if (expression is MethodCallExpression methodCall
-            && TryExtractMethodCallFilter(methodCall, entityParam, out var mcFilter))
+            && TryExtractMethodCallFilter(entityType, methodCall, entityParam, out var mcFilter))
         {
             branches.Add(mcFilter);
             return true;
@@ -708,6 +887,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
     /// <c>e.Col != null</c> → <c>not.is.null</c>.
     /// </summary>
     private static bool TryExtractNullCheck(
+        IEntityType entityType,
         BinaryExpression binary,
         ParameterExpression entityParam,
         out PostgRestFilter filter)
@@ -720,11 +900,12 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         var negate = binary.NodeType == ExpressionType.NotEqual;
 
         // column == null or column != null
-        if (TryExtractColumnName(binary.Left, entityParam, out var column)
+        if (TryExtractPropertyName(binary.Left, entityParam, out var propName) && entityType.GetProperty(propName)?.ColumnName is { } column
             && IsNullConstant(binary.Right))
         {
             filter = new PostgRestFilter
             {
+                PropertyName = propName,
                 Column = column,
                 Operator = PostgRestFilterOperator.Is,
                 Negate = negate,
@@ -734,11 +915,12 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         }
 
         // null == column or null != column
-        if (TryExtractColumnName(binary.Right, entityParam, out column)
+        if (TryExtractPropertyName(binary.Right, entityParam, out propName) && (column = entityType.GetProperty(propName)?.ColumnName) is { } 
             && IsNullConstant(binary.Left))
         {
             filter = new PostgRestFilter
             {
+                PropertyName = propName,
                 Column = column,
                 Operator = PostgRestFilterOperator.Is,
                 Negate = negate,
@@ -758,6 +940,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
     }
 
     private static bool TryExtractBinaryFilter(
+        IEntityType entityType,
         BinaryExpression binary,
         ParameterExpression entityParam,
         out PostgRestFilter filter)
@@ -769,11 +952,12 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             return false;
 
         // Try: column op value
-        if (TryExtractColumnName(binary.Left, entityParam, out var column)
+        if (TryExtractPropertyName(binary.Left, entityParam, out var propName) && entityType.GetProperty(propName)?.ColumnName is { } column
             && TryExtractValue(binary.Right, out var value, out var paramName, out var isParam))
         {
             filter = new PostgRestFilter
             {
+                PropertyName = propName,
                 Column = column,
                 Operator = op.Value,
                 Value = value,
@@ -784,11 +968,12 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         }
 
         // Try reversed: value op column → flip operator
-        if (TryExtractColumnName(binary.Right, entityParam, out column)
+        if (TryExtractPropertyName(binary.Right, entityParam, out propName) && (column = entityType.GetProperty(propName)?.ColumnName) is { }
             && TryExtractValue(binary.Left, out value, out paramName, out isParam))
         {
             filter = new PostgRestFilter
             {
+                PropertyName = propName,
                 Column = column,
                 Operator = ReverseOperator(op.Value),
                 Value = value,
@@ -802,6 +987,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
     }
 
     private static bool TryExtractMethodCallFilter(
+        IEntityType entityType,
         MethodCallExpression call,
         ParameterExpression entityParam,
         out PostgRestFilter filter)
@@ -813,13 +999,14 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             // string.Contains(value) → like.*value*
             if (call.Method.Name == nameof(string.Contains)
                 && call.Object is not null
-                && TryExtractColumnName(call.Object, entityParam, out var column)
+                && TryExtractPropertyName(call.Object, entityParam, out var pName) && entityType.GetProperty(pName)?.ColumnName is { } column
                 && call.Arguments.Count == 1
                 && TryExtractValue(call.Arguments[0], out var value, out var paramName, out var isParam))
             {
                 var likeValue = isParam ? value : $"*{value}*";
                 filter = new PostgRestFilter
                 {
+                    PropertyName = pName,
                     Column = column,
                     Operator = PostgRestFilterOperator.Like,
                     Value = likeValue,
@@ -832,13 +1019,14 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             // string.StartsWith(value) → like.value*
             if (call.Method.Name == nameof(string.StartsWith)
                 && call.Object is not null
-                && TryExtractColumnName(call.Object, entityParam, out column)
+                && TryExtractPropertyName(call.Object, entityParam, out pName) && (column = entityType.GetProperty(pName)?.ColumnName) is { }
                 && call.Arguments.Count == 1
                 && TryExtractValue(call.Arguments[0], out value, out paramName, out isParam))
             {
                 var likeValue = isParam ? value : $"{value}*";
                 filter = new PostgRestFilter
                 {
+                    PropertyName = pName,
                     Column = column,
                     Operator = PostgRestFilterOperator.Like,
                     Value = likeValue,
@@ -851,13 +1039,14 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             // string.EndsWith(value) → like.*value
             if (call.Method.Name == nameof(string.EndsWith)
                 && call.Object is not null
-                && TryExtractColumnName(call.Object, entityParam, out column)
+                && TryExtractPropertyName(call.Object, entityParam, out pName) && (column = entityType.GetProperty(pName)?.ColumnName) is { }
                 && call.Arguments.Count == 1
                 && TryExtractValue(call.Arguments[0], out value, out paramName, out isParam))
             {
                 var likeValue = isParam ? value : $"*{value}";
                 filter = new PostgRestFilter
                 {
+                    PropertyName = pName,
                     Column = column,
                     Operator = PostgRestFilterOperator.Like,
                     Value = likeValue,
@@ -872,11 +1061,12 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         // e.g. ids.Contains(e.Id) → ?id=in.(1,2,3)
         if (call.Method.Name == nameof(Enumerable.Contains)
             && call.Arguments.Count == 2
-            && TryExtractColumnName(call.Arguments[1], entityParam, out var inColumn)
+            && TryExtractPropertyName(call.Arguments[1], entityParam, out var propName) && entityType.GetProperty(propName)?.ColumnName is { } inColumn
             && TryExtractCollectionValue(call.Arguments[0], out var collectionValue, out var collectionParamName, out var collectionIsParam))
         {
             filter = new PostgRestFilter
             {
+                PropertyName = propName,
                 Column = inColumn,
                 Operator = PostgRestFilterOperator.In,
                 Value = collectionValue,
@@ -891,11 +1081,12 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         if (call.Method.Name == nameof(IList.Contains)
             && call.Arguments.Count == 1
             && call.Object is not null
-            && TryExtractColumnName(call.Arguments[0], entityParam, out inColumn)
+            && TryExtractPropertyName(call.Arguments[0], entityParam, out propName) && (inColumn = entityType.GetProperty(propName)?.ColumnName) is { } 
             && TryExtractCollectionValue(call.Object, out collectionValue, out collectionParamName, out collectionIsParam))
         {
             filter = new PostgRestFilter
             {
+                PropertyName = propName,
                 Column = inColumn,
                 Operator = PostgRestFilterOperator.In,
                 Value = collectionValue,
@@ -908,7 +1099,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         return false;
     }
 
-    private static bool TryExtractColumnName(
+    private static bool TryExtractPropertyName(
         Expression expression,
         ParameterExpression entityParam,
         out string columnName)
@@ -918,7 +1109,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         if (expression is MemberExpression { Expression: { } memberTarget } memberExpr
             && memberTarget == entityParam)
         {
-            columnName = memberExpr.Member.Name.ToLowerInvariant();
+            columnName = memberExpr.Member.Name;
             return true;
         }
 
