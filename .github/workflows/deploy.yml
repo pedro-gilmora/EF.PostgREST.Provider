@@ -47,7 +47,7 @@ jobs:
         }
       
     - name: Publish generator and endpoints to Nuget
-      if: github.ref_name == 'master'
+      if: startsWith(github.event.head_commit.message, '[Release]')
       id: publish
       run: |        
         for package in $(find ./packaging -maxdepth 1 -name '*.nupkg'); do
@@ -110,6 +110,8 @@ jobs:
         } else {
           'cancelled', '⛔', 'User aborted the action'
         }
+        
+        $jobId, $jobName = (gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs --jq '.jobs[0] | "\(.id)|\(.name)"') -split '\|', 2
 
         $message = @"
         🚀 *$(escape '${{ github.workflow }}')* \#${{ github.run_number }} 
@@ -117,7 +119,8 @@ jobs:
         👤 *Triggered by:* [$( escape "${{ github.triggering_actor }}" )](https://github.com/$( escape "${{ github.triggering_actor }}" ))
         🌿 *Branch:* $( escape "${{ github.ref_name }}" )
         🔗 *Change:* *[$( $githubEvent.head_commit.id.Substring(0,8) )]($( escape $githubEvent.head_commit.url ))*
-  
+        ⚙️ *Action* [$( escape $jobName )](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/job/$jobId)
+
         *$(escape ( releaseTrimming $githubEvent.head_commit.message) )*$(if($commits.Count -gt 1 ) { "
         
         $([string]::Join("
