@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Text.Json;
 
 namespace PosgREST.DbContext.Provider.Core;
@@ -86,17 +87,12 @@ public sealed class PostgRestException(
 
         try
         {
-            using var stream = await response.Content
-                .ReadAsStreamAsync(cancellationToken)
+            var jsonResponse = await response.Content
+                .ReadFromJsonAsync<JsonElement?>(cancellationToken)
                 .ConfigureAwait(false);
 
-            if (stream.Length > 0)
+            if (jsonResponse is { } root)
             {
-                using var doc = await JsonDocument
-                    .ParseAsync(stream, cancellationToken: cancellationToken)
-                    .ConfigureAwait(false);
-                var root = doc.RootElement;
-
                 if (root.TryGetProperty("message", out var msgEl))
                     message = msgEl.GetString();
                 if (root.TryGetProperty("details", out var detEl))

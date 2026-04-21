@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 using System.Collections;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -202,12 +203,11 @@ public sealed class PostgRestQueryingEnumerable<T>(
 
             PostgRestException.ThrowIfError(response);
 
-            using var stream = response.Content.ReadAsStream();
-            using var doc = JsonDocument.Parse(stream);
+            var result = response.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(false).GetAwaiter().GetResult();
 
-            return doc.RootElement.ValueKind == JsonValueKind.Array
-                ? doc.RootElement.EnumerateArray().Select(e => e.Clone()).ToList()
-                : [doc.RootElement.Clone()];
+            return result.ValueKind == JsonValueKind.Array
+                ? result.EnumerateArray().ToList()
+                : [result];
         }
     }
 
@@ -259,14 +259,12 @@ public sealed class PostgRestQueryingEnumerable<T>(
             await PostgRestException.ThrowIfErrorAsync(response, _cancellationToken)
                 .ConfigureAwait(false);
 
-            using var stream = await response.Content.ReadAsStreamAsync(_cancellationToken)
-                .ConfigureAwait(false);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: _cancellationToken)
+            var result = await response.Content.ReadFromJsonAsync<JsonElement>(_cancellationToken)
                 .ConfigureAwait(false);
 
-            return doc.RootElement.ValueKind == JsonValueKind.Array
-                ? doc.RootElement.EnumerateArray().Select(e => e.Clone()).ToList()
-                : [doc.RootElement.Clone()];
+            return result.ValueKind == JsonValueKind.Array
+                ? result.EnumerateArray().ToList()
+                : [result];
         }
     }
 }

@@ -69,13 +69,9 @@ public class PostgRestShapedQueryCompilingExpressionVisitor(ShapedQueryCompiling
             Expression.Constant(queryExpression.OrFilters.ToList(), typeof(IReadOnlyList<PostgRestOrFilter>)),
             Expression.Constant(queryExpression.SelectColumns.ToList(), typeof(IReadOnlyList<string>)),
             Expression.Constant(queryExpression.OrderByClauses.ToList(), typeof(IReadOnlyList<PostgRestOrderByClause>)),
-            queryExpression.Offset is { } offset
-                ? Expression.Constant(offset, typeof(int?))
-                : Expression.Constant(null, typeof(int?)),
+            Expression.Constant(queryExpression.Offset, typeof(int?)),
             Expression.Constant(queryExpression.OffsetParameterName, typeof(string)),
-            queryExpression.Limit is { } limit
-                ? Expression.Constant(limit, typeof(int?))
-                : Expression.Constant(null, typeof(int?)),
+            Expression.Constant(queryExpression.Limit, typeof(int?)),
             Expression.Constant(queryExpression.LimitParameterName, typeof(string)),
             Expression.Constant(compiledShaper));
     }

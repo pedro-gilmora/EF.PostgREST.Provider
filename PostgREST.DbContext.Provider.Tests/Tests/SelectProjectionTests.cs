@@ -18,6 +18,25 @@ public class SelectProjectionTests
     // ──────────────────────────────────────────────────────────────────────────
 
     [Fact]
+    public void Select_AnonymousType_ReturnsCorrectShape_Sync()
+    {
+        using var db = new AppDbContext(BaseUrl);
+
+        var rows = db.Categorias
+            .OrderBy(c => c.Id)
+            .Take(3)
+            .Select(c => new { c.Id, c.Nombre })
+            .ToList();
+
+        Assert.NotEmpty(rows);
+        Assert.All(rows, r =>
+        {
+            Assert.True(r.Id > 0);
+            Assert.NotNull(r.Nombre);
+        });
+    }
+
+    [Fact]
     public async Task Select_AnonymousType_ReturnsCorrectShape()
     {
         await using var db = new AppDbContext(BaseUrl);

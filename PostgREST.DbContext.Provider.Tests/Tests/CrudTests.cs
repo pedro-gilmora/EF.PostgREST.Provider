@@ -23,7 +23,7 @@ public class CrudTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var categorias = await db.Categorias.ToListAsync();
+        var categorias = await db.Categorias.ToDictionaryAsync(r => r.Id, r => r.Nombre);
 
         Assert.NotNull(categorias);
         // We can't assert an exact count since the DB is live,
