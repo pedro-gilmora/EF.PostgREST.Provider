@@ -1,4 +1,6 @@
-﻿using PosgREST.DbContext.Provider.Console;
+﻿using PosgREST.DbContext.Provider;
+
+using PostgREST.DbContext.Provider.PackageTesting.AppDbContext;
 using Microsoft.EntityFrameworkCore;
 
 using Xunit;
@@ -19,7 +21,7 @@ namespace PostgREST.DbContext.Provider.PackageTesting
         [Fact]
         public async Task SelectAll_ReturnsAllCategorias()
         {
-            using var ctx = new AppDbContext(BaseUrl);
+            using var ctx = new AppDbContext.AppDbContext(BaseUrl);
             var productos = await ctx.Producto.ToListAsync();
         }
     }

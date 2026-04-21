@@ -1,9 +1,12 @@
-using System.Collections;
-using System.Net.Http.Headers;
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.EntityFrameworkCore.Storage;
+
+using System.Collections;
+using System.Net.Http.Headers;
+using System.Runtime.CompilerServices;
+using System.Text;
+using System.Text.Json;
 
 namespace PosgREST.DbContext.Provider.Core.Query;
 
@@ -56,12 +59,11 @@ public sealed class PostgRestQueryingEnumerable<T>(
 
     private string BuildUrl()
     {
-        var url = $"{_queryContext.BaseUrl}/{_tableName}";
-        var queryParams = new List<string>();
+        StringBuilder urlBuilder = new ();
 
         // Vertical filtering: ?select=col1,col2
         if (_selectColumns.Count > 0)
-            queryParams.Add($"select={string.Join(",", _selectColumns)}");
+            urlBuilder.Append(GetSeparator()).Append("select=").AppendJoin(",", _selectColumns);
 
         // Horizontal filters: ?column=op.value
         foreach (var filter in _filters)
@@ -69,7 +71,7 @@ public sealed class PostgRestQueryingEnumerable<T>(
             var value = filter.IsParameter
                 ? _queryContext.Parameters[filter.ParameterName!]
                 : filter.Value;
-            queryParams.Add(filter.ToQueryStringSegment(value));
+            urlBuilder.Append(GetSeparator()).Append(filter.ToQueryStringSegment(value));
         }
 
         // OR filter groups: ?or=(cond1,cond2)
@@ -83,39 +85,41 @@ public sealed class PostgRestQueryingEnumerable<T>(
                     : branch.Value;
                 segments.Add(branch.ToOrSegment(value));
             }
-            queryParams.Add($"or=({string.Join(",", segments)})");
+            urlBuilder.Append(GetSeparator()).Append("or=(").AppendJoin(",", segments).Append(')');
         }
 
         if (_orderByClauses.Count > 0)
         {
             var orderParts = string.Join(",", _orderByClauses);
-            queryParams.Add($"order={orderParts}");
+            urlBuilder.Append(GetSeparator()).Append("order=").Append(orderParts);
         }
 
         var resolvedOffset = _offset
             ?? (_offsetParameterName is not null
                 ? (int?)_queryContext.Parameters[_offsetParameterName]
                 : null);
-        if (resolvedOffset is { } offset)
-            queryParams.Add($"offset={offset}");
 
-        var resolvedLimit = _limit
-            ?? (_limitParameterName is not null
+        if (resolvedOffset is { } offset)
+            urlBuilder.Append(GetSeparator()).Append("offset=").Append(offset);
+
+        var resolvedLimit = _limit ?? (_limitParameterName is not null
                 ? (int?)_queryContext.Parameters[_limitParameterName]
                 : null);
+
         if (resolvedLimit is { } limit)
-            queryParams.Add($"limit={limit}");
+            urlBuilder.Append(GetSeparator()).Append("limit=").Append(limit);
 
-        if (queryParams.Count > 0)
-            url += "?" + string.Join("&", queryParams);
+        urlBuilder.Insert(0, $"{_queryContext.BaseUrl}/{_tableName}");
 
-        return url;
+        return urlBuilder.ToString();
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        char GetSeparator() => urlBuilder.Length > 0 ? '&' : '?';
     }
 
-    private IReadOnlyList<IProperty> GetOrderedProperties()
-        => _entityType.GetProperties().ToList();
+    private IReadOnlyList<IProperty> GetOrderedProperties()=> [.. _entityType.GetProperties()];
 
-    private ValueBuffer CreateValueBuffer(JsonElement element, IReadOnlyList<IProperty> properties)
+    private static ValueBuffer CreateValueBuffer(JsonElement element, IReadOnlyList<IProperty> properties)
     {
         var values = new object?[properties.Count];
 
@@ -175,7 +179,7 @@ public sealed class PostgRestQueryingEnumerable<T>(
             {
                 var element = _results[_index];
                 _enumerable._queryContext.CurrentJsonElement = element;
-                var valueBuffer = _enumerable.CreateValueBuffer(element, _properties!);
+                var valueBuffer = PostgRestQueryingEnumerable<T>.CreateValueBuffer(element, _properties!);
                 Current = _enumerable._shaper(_enumerable._queryContext, valueBuffer);
                 return true;
             }
@@ -232,7 +236,7 @@ public sealed class PostgRestQueryingEnumerable<T>(
             {
                 var element = _results[_index];
                 _enumerable._queryContext.CurrentJsonElement = element;
-                var valueBuffer = _enumerable.CreateValueBuffer(element, _properties!);
+                var valueBuffer = PostgRestQueryingEnumerable<T>.CreateValueBuffer(element, _properties!);
                 Current = _enumerable._shaper(_enumerable._queryContext, valueBuffer);
                 return true;
             }

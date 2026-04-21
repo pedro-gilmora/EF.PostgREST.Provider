@@ -1,10 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+
 using PosgREST.DbContext.Provider.Core;
 using PosgREST.DbContext.Provider.Core.Extensions;
 
 using PostgREST.DbContext.Provider.PackageTesting.Models;
 
-namespace PosgREST.DbContext.Provider.Console;
+namespace PostgREST.DbContext.Provider.PackageTesting.AppDbContext;
 
 /// <summary>
 /// DbContext targeting the PostgREST instance at the configured base URL.

@@ -25,7 +25,7 @@
 		<PackageReference Include="SourceCrafter.EF.PostgREST.Provider.Analyzers" Version="0.26.55.151" />
 	</ItemGroup>
 	<ItemGroup>
-	  <ProjectReference Include="..\PostgREST.DbContext.Provider.Analyzers\PostgREST.DbContext.Provider.Analyzers.csproj" OutputItemType="analyzer"/>
+	  <ProjectReference Include="..\PostgREST.DbContext.Provider.Analyzers\PostgREST.DbContext.Provider.Analyzers.csproj" OutputItemType="analyzer" />
 	  <ProjectReference Include="..\PostgREST.DbContext.Provider\PostgREST.DbContext.Provider.csproj" />
 	</ItemGroup>
 

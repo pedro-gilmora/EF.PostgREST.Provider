@@ -20,7 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\PostgREST.DbContext.Provider\PostgREST.DbContext.Provider.csproj" />
-    <ProjectReference Include="..\PostgREST.DbContext.Provider.Analyzers\PostgREST.DbContext.Provider.Analyzers.csproj" ReferenceOutputAssembly="true" OutputItemType="" />
+    <ProjectReference Include="..\PostgREST.DbContext.Provider.Analyzers\PostgREST.DbContext.Provider.Analyzers.csproj" ReferenceOutputAssembly="true" OutputItemType="analyzer" />
   </ItemGroup>
 
 </Project>

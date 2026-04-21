@@ -25,17 +25,20 @@ public class Tests
             { 
                 Id = p.Id, 
                 Name = p.Nombre, 
-                Purchases = p.Compras.Select(c => new PurchaseDto 
-                    { 
-                        Id = c.Id, 
-                        Quantity = c.Cantidad, 
-                        UnitMeasureId = c.IdUnidadMedida, 
-                        Date = c.Fecha, 
-                        Price = c.Precio, 
-                        Currency = c.Moneda, 
-                        SalePrice = c.PrecioVenta, 
-                        SaleCurrency = c.MonedaVenta
-                    }).ToList()
+                Purchases = p.Compras
+                    .Select(c => 
+                        new PurchaseDto 
+                        { 
+                            Id = c.Id, 
+                            Quantity = c.Cantidad, 
+                            UnitMeasureId = c.IdUnidadMedida, 
+                            Date = c.Fecha, 
+                            Price = c.Precio, 
+                            Currency = c.Moneda, 
+                            SalePrice = c.PrecioVenta, 
+                            SaleCurrency = c.MonedaVenta
+                        })
+                    .ToList()
             }).ToListAsync();
     }
 }

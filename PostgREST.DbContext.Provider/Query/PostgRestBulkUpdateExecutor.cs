@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Query;
 
 using System.Net.Http.Headers;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 
@@ -164,39 +165,42 @@ public static class PostgRestBulkUpdateExecutor
     }
 
     private static string BuildUrl(
-        PostgRestQueryContext ctx,
+        PostgRestQueryContext _queryContext,
         string tableName,
-        IReadOnlyList<PostgRestFilter> filters,
-        IReadOnlyList<PostgRestOrFilter> orFilters)
+        IReadOnlyList<PostgRestFilter> _filters,
+        IReadOnlyList<PostgRestOrFilter> _orFilters)
     {
-        var url = $"{ctx.BaseUrl}/{tableName}";
-        var queryParams = new List<string>();
+        StringBuilder urlBuilder = new();
 
-        foreach (var filter in filters)
+        // Horizontal filters: ?column=op.value
+        foreach (var filter in _filters)
         {
             var value = filter.IsParameter
-                ? ctx.Parameters[filter.ParameterName!]
+                ? _queryContext.Parameters[filter.ParameterName!]
                 : filter.Value;
-            queryParams.Add(filter.ToQueryStringSegment(value));
+            urlBuilder.Append(GetSeparator()).Append(filter.ToQueryStringSegment(value));
         }
 
-        foreach (var orFilter in orFilters)
+        // OR filter groups: ?or=(cond1,cond2)
+        foreach (var orFilter in _orFilters)
         {
             var segments = new List<string>(orFilter.Branches.Count);
             foreach (var branch in orFilter.Branches)
             {
                 var value = branch.IsParameter
-                    ? ctx.Parameters[branch.ParameterName!]
+                    ? _queryContext.Parameters[branch.ParameterName!]
                     : branch.Value;
                 segments.Add(branch.ToOrSegment(value));
             }
-            queryParams.Add($"or=({string.Join(",", segments)})");
+            urlBuilder.Append(GetSeparator()).Append("or=(").AppendJoin(",", segments).Append(')');
         }
 
-        if (queryParams.Count > 0)
-            url += "?" + string.Join("&", queryParams);
+        urlBuilder.Insert(0, $"{_queryContext.BaseUrl}/{tableName}");
 
-        return url;
+        return urlBuilder.ToString();
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        char GetSeparator() => urlBuilder.Length > 0 ? '&' : '?';
     }
 
     private static string SerializeSetters(
