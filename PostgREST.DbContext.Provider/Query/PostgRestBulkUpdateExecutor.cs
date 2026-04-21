@@ -33,7 +33,7 @@ public static class PostgRestBulkUpdateExecutor
         IEntityType entityType,
         IReadOnlyList<PostgRestFilter> filters,
         IReadOnlyList<PostgRestOrFilter> orFilters,
-        IReadOnlyList<(string Column, string PropertyName, object? Value, string? ParameterName, bool IsParameter)> setters)
+        IReadOnlyList<SetterInfo> setters)
     {
         var ctx = (PostgRestQueryContext)queryContext;
 
@@ -56,7 +56,7 @@ public static class PostgRestBulkUpdateExecutor
         IEntityType entityType,
         IReadOnlyList<PostgRestFilter> filters,
         IReadOnlyList<PostgRestOrFilter> orFilters,
-        IReadOnlyList<(string Column, string PropertyName, object? Value, string? ParameterName, bool IsParameter)> setters)
+        IReadOnlyList<SetterInfo> setters)
     {
         var ctx = (PostgRestQueryContext)queryContext;
         var cancellationToken = queryContext.CancellationToken;
@@ -81,7 +81,7 @@ public static class PostgRestBulkUpdateExecutor
     private static void SyncTrackedEntities(
         PostgRestQueryContext ctx,
         IEntityType entityType,
-        IReadOnlyList<(string Column, string PropertyName, object? Value, string? ParameterName, bool IsParameter)> setters,
+        IReadOnlyList<SetterInfo> setters,
         IReadOnlyList<PostgRestFilter> filters,
         IReadOnlyList<PostgRestOrFilter> orFilters)
     {
@@ -137,7 +137,7 @@ public static class PostgRestBulkUpdateExecutor
         string tableName,
         IReadOnlyList<PostgRestFilter> filters,
         IReadOnlyList<PostgRestOrFilter> orFilters,
-        IReadOnlyList<(string Column, string PropertyName, object? Value, string? ParameterName, bool IsParameter)> setters)
+        IReadOnlyList<SetterInfo> setters)
     {
         var url = BuildUrl(ctx, tableName, filters, orFilters);
         var body = SerializeSetters(ctx, setters);
@@ -205,7 +205,7 @@ public static class PostgRestBulkUpdateExecutor
 
     private static string SerializeSetters(
         PostgRestQueryContext ctx,
-        IReadOnlyList<(string Column, string PropertyName, object? Value, string? ParameterName, bool IsParameter)> setters)
+        IReadOnlyList<SetterInfo> setters)
     {
         var dict = new Dictionary<string, object?>(setters.Count);
 
@@ -248,5 +248,18 @@ public static class PostgRestBulkUpdateExecutor
         }
 
         return -1;
+    }
+}
+
+public record struct SetterInfo(string Column, string PropertyName, object? Value, string? ParameterName, bool IsParameter)
+{
+    public static implicit operator (string Column, string PropertyName, object? Value, string? ParameterName, bool IsParameter)(SetterInfo value)
+    {
+        return (value.Column, value.PropertyName, value.Value, value.ParameterName, value.IsParameter);
+    }
+
+    public static implicit operator SetterInfo((string Column, string PropertyName, object? Value, string? ParameterName, bool IsParameter) value)
+    {
+        return new SetterInfo(value.Column, value.PropertyName, value.Value, value.ParameterName, value.IsParameter);
     }
 }

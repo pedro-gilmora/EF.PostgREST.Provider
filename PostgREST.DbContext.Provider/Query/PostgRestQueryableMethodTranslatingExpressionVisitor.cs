@@ -543,7 +543,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
         // ── Resolve each setter to (columnName, propertyName, value/paramName) ────
         var resolvedSetters =
-            new List<(string Column, string PropertyName, object? Value, string? ParameterName, bool IsParameter)>(setters.Count);
+            new List<SetterInfo>(setters.Count);
 
         foreach (var setter in setters)
         {
@@ -598,7 +598,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
         var settersConstant = Expression.Constant(
             resolvedSetters,
-            typeof(IReadOnlyList<(string, string, object?, string?, bool)>));
+            typeof(IReadOnlyList<SetterInfo>));
 
         // EF Core requires the returned expression type to match the execution path:
         //   • ExecuteUpdate      → Expression returning int
