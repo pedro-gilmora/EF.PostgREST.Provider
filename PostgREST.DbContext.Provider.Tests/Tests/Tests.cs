@@ -1,7 +1,10 @@
 using Microsoft.EntityFrameworkCore;
+
+using PosgREST.DbContext.Provider.Console;
+
 using Xunit;
 
-namespace PosgREST.DbContext.Provider.Console.Tests;
+namespace PostgREST.DbContext.Provider.Tests.Tests;
 
 /// <summary>
 /// Integration tests covering basic SELECT queries and the full INSERT → UPDATE → DELETE
@@ -21,6 +24,7 @@ public class Tests
     public async Task SelectAll_ReturnsAllCategorias()
     {
         using var ctx = new AppDbContext(BaseUrl);
+
         var productos = await ctx.Producto.Select(p => new ProductDto 
             { 
                 Id = p.Id, 
@@ -35,11 +39,13 @@ public class Tests
                             Date = c.Fecha, 
                             Price = c.Precio, 
                             Currency = c.Moneda, 
-                            SalePrice = c.PrecioVenta, 
+                            SalePrice = c.PrecioVenta,
                             SaleCurrency = c.MonedaVenta
                         })
                     .ToList()
             }).ToListAsync();
+
+        Assert.True(productos.Count > 0);
     }
 }
 

@@ -22,7 +22,7 @@ public class SelectProjectionTests
     {
         using var db = new AppDbContext(BaseUrl);
 
-        var rows = db.Categorias
+        var rows = db.Categoria
             .OrderBy(c => c.Id)
             .Take(3)
             .Select(c => new { c.Id, c.Nombre })
@@ -41,7 +41,7 @@ public class SelectProjectionTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var rows = await db.Categorias
+        var rows = await db.Categoria
             .OrderBy(c => c.Id)
             .Take(3)
             .Select(c => new { c.Id, c.Nombre })
@@ -64,7 +64,7 @@ public class SelectProjectionTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var ids = await db.Categorias
+        var ids = await db.Categoria
             .OrderBy(c => c.Id)
             .Take(5)
             .Select(c => c.Id)
@@ -83,7 +83,7 @@ public class SelectProjectionTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var tuples = await db.Categorias
+        var tuples = await db.Categoria
             .OrderBy(c => c.Id)
             .Take(3)
             .Select(c => ValueTuple.Create(c.Id, c.Nombre))
@@ -106,7 +106,7 @@ public class SelectProjectionTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var dtos = await db.Categorias
+        var dtos = await db.Categoria
             .OrderBy(c => c.Id)
             .Take(3)
             .Select(c => new CategoriaDto(c.Id, c.Nombre))
@@ -129,7 +129,7 @@ public class SelectProjectionTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var summaries = await db.Categorias
+        var summaries = await db.Categoria
             .OrderBy(c => c.Id)
             .Take(3)
             .Select(c => new CategoriaSummary { Id = c.Id, Label = c.Nombre })
@@ -152,7 +152,7 @@ public class SelectProjectionTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var rows = await db.Categorias
+        var rows = await db.Categoria
             .OrderBy(c => c.Id)
             .Take(3)
             .Select(c => new
@@ -180,7 +180,7 @@ public class SelectProjectionTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var results = await db.Categorias
+        var results = await db.Categoria
             .Where(c => c.Id > 1)
             .OrderBy(c => c.Id)
             .Take(4)

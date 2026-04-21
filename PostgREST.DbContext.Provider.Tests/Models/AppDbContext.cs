@@ -3,6 +3,7 @@ using PosgREST.DbContext.Provider.Core;
 using PosgREST.DbContext.Provider.Core.Extensions;
 
 using PostgREST.DbContext.Provider.Analyzers.Tests.Models;
+using PostgREST.DbContext.Provider.Tests.Models;
 
 namespace PosgREST.DbContext.Provider.Console;
 
@@ -22,4 +23,6 @@ public class AppDbContext(string baseUrl) : Microsoft.EntityFrameworkCore.DbCont
 
     public DbSet<Venta> Venta { get; set; } = null!;
     public DbSet<Compra> Compra { get; set; } = null!;
-}
+
+    public DbSet<Categoria> Categoria { get; set; } = null!;
+    public DbSet<Persona> Persona { get; set; } = null!;}

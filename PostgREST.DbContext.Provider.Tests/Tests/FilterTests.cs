@@ -21,7 +21,7 @@ public class FilterTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var first = await db.Categorias.FirstOrDefaultAsync();
+        var first = await db.Categoria.FirstOrDefaultAsync();
 
         // The table is expected to have at least one row for these tests to be
         // meaningful. Adjust if you are testing against an empty DB.
@@ -33,7 +33,7 @@ public class FilterTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var result = await db.Categorias.FirstOrDefaultAsync(c => c.Id == -999);
+        var result = await db.Categoria.FirstOrDefaultAsync(c => c.Id == -999);
 
         Assert.Null(result);
     }
@@ -47,7 +47,7 @@ public class FilterTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var results = await db.Categorias
+        var results = await db.Categoria
             .Where(c => c.Nombre.StartsWith("Test"))
             .ToListAsync();
 
@@ -60,7 +60,7 @@ public class FilterTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var results = await db.Categorias
+        var results = await db.Categoria
             .Where(c => c.Nombre.EndsWith("02"))
             .ToListAsync();
 
@@ -77,7 +77,7 @@ public class FilterTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var results = await db.Categorias
+        var results = await db.Categoria
             .Where(c => c.Id == 2 || c.Id == 3)
             .ToListAsync();
 
@@ -95,7 +95,7 @@ public class FilterTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var results = await db.Categorias
+        var results = await db.Categoria
             .Where(c => !c.Nombre.Contains("Test"))
             .ToListAsync();
 
@@ -112,7 +112,7 @@ public class FilterTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var results = await db.Personas
+        var results = await db.Persona
             .Where(p => p.Nombre == null)
             .ToListAsync();
 
@@ -125,7 +125,7 @@ public class FilterTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var results = await db.Personas
+        var results = await db.Persona
             .Where(p => p.Nombre != null)
             .ToListAsync();
 
@@ -143,7 +143,7 @@ public class FilterTests
         await using var db = new AppDbContext(BaseUrl);
         var ids = new List<int> { 2, 3 };
 
-        var results = await db.Categorias
+        var results = await db.Categoria
             .Where(c => ids.Contains(c.Id))
             .ToListAsync();
 

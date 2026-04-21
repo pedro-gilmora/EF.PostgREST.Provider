@@ -10,7 +10,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
-namespace PostgREST.DbContext.Provider.PackageTesting.Models;
+namespace PostgREST.DbContext.Provider.Tests.Models;
 
 [Table("persona")]
 public class Persona

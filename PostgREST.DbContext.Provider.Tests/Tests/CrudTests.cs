@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using PosgREST.DbContext.Provider.Console.Models;
+
+using PostgREST.DbContext.Provider.Tests.Models;
+
 using Xunit;
 
 namespace PosgREST.DbContext.Provider.Console.Tests;
@@ -23,7 +25,7 @@ public class CrudTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var categorias = await db.Categorias.ToDictionaryAsync(r => r.Id, r => r.Nombre);
+        var categorias = await db.Categoria.ToDictionaryAsync(r => r.Id, r => r.Nombre);
 
         Assert.NotNull(categorias);
         // We can't assert an exact count since the DB is live,
@@ -38,7 +40,7 @@ public class CrudTests
         await using var db = new AppDbContext(BaseUrl);
 
         // Either a record exists or null is fine — what matters is no exception.
-        var cat = await db.Categorias.FirstOrDefaultAsync(c => c.Id == 1);
+        var cat = await db.Categoria.FirstOrDefaultAsync(c => c.Id == 1);
 
         Assert.True(cat is null || cat.Id == 1);
     }
@@ -49,7 +51,7 @@ public class CrudTests
     {
         await using var db = new AppDbContext(BaseUrl);
 
-        var top3 = await db.Categorias
+        var top3 = await db.Categoria
             .OrderBy(c => c.Nombre)
             .Take(3)
             .ToListAsync();
@@ -82,7 +84,7 @@ public class CrudTests
         {
             await using var db = new AppDbContext(BaseUrl);
             var newCat = new Categoria { Nombre = $"xUnit-{DateTime.UtcNow:HHmmss}" };
-            db.Categorias.Add(newCat);
+            db.Categoria.Add(newCat);
             var affected = await db.SaveChangesAsync();
 
             Assert.Equal(1, affected);
@@ -93,10 +95,10 @@ public class CrudTests
         // ── 5. UPDATE ─────────────────────────────────────────────────────────
         {
             await using var db = new AppDbContext(BaseUrl);
-            var cat = await db.Categorias.FirstOrDefaultAsync(c => c.Id == insertedId);
+            var cat = await db.Categoria.FirstOrDefaultAsync(c => c.Id == insertedId);
             var newDate = $"xUnit-Updated-{DateTime.UtcNow:HHmmss}";
 
-            var update = await db.Categorias
+            var update = await db.Categoria
                             .Where(c => c.Id == insertedId)
                             .ExecuteUpdateAsync(p => p.SetProperty(c => c.Nombre, newDate));
 
@@ -107,7 +109,7 @@ public class CrudTests
         // ── 6. DELETE ─────────────────────────────────────────────────────────
         {
             await using var db = new AppDbContext(BaseUrl);
-            var affected = await db.Categorias.Where(c => c.Id == insertedId).ExecuteDeleteAsync();
+            var affected = await db.Categoria.Where(c => c.Id == insertedId).ExecuteDeleteAsync();
 
             Assert.Equal(1, affected);
         }
@@ -115,7 +117,7 @@ public class CrudTests
         // ── 7. VERIFY deletion ────────────────────────────────────────────────
         {
             await using var db = new AppDbContext(BaseUrl);
-            var gone = await db.Categorias.FirstOrDefaultAsync(c => c.Id == insertedId);
+            var gone = await db.Categoria.FirstOrDefaultAsync(c => c.Id == insertedId);
 
             Assert.Null(gone);
         }

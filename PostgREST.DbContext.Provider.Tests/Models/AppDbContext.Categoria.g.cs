@@ -10,17 +10,17 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
-namespace PostgREST.DbContext.Provider.PackageTesting.Models;
+namespace PostgREST.DbContext.Provider.Tests.Models;
 
-[Table("producto")]
-public class Producto
+[Table("categoria")]
+public class Categoria
 {
     [Key]
     [Column("id")]
     public int Id { get; set; }
 
     [Required]
-    [MaxLength(250)]
+    [MaxLength(50)]
     [Column("nombre")]
     public string Nombre { get; set; } = default!;
 }
