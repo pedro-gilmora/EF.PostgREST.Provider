@@ -87,11 +87,11 @@ public sealed class PostgRestDbContextOptionsExtension : IDbContextOptionsExtens
             return client;
         });
 
-        services.AddSingleton(this);
-        services.AddSingleton(sp =>
-            new PostgRestDatabaseDependencies(
-                sp.GetRequiredService<HttpClient>(),
-                sp.GetRequiredService<PostgRestDbContextOptionsExtension>()));
+        services.AddSingleton(this)
+                .AddSingleton(sp =>
+                    new PostgRestDatabaseDependencies(
+                        sp.GetRequiredService<HttpClient>(),
+                        sp.GetRequiredService<PostgRestDbContextOptionsExtension>()));
     }
 
     /// <inheritdoc />

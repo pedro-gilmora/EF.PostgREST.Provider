@@ -55,4 +55,7 @@ public class Compra
 
     [Column("idUnidadMedida")]
     public int IdUnidadMedida { get; set; }
+
+    [ForeignKey("IdProducto")]
+    public Producto Producto { get; set; }
 }

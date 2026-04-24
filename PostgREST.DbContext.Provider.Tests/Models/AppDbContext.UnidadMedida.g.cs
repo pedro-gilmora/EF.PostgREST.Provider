@@ -10,18 +10,22 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
-namespace PostgREST.DbContext.Provider.Analyzers.Tests.Models;
+namespace PostgREST.DbContext.Provider.Tests.Models;
 
-[Table("producto")]
-public class Producto
+[Table("unidadMedida")]
+public class UnidadMedida
 {
     [Key]
     [Column("id")]
     public int Id { get; set; }
 
     [Required]
-    [MaxLength(250)]
+    [MaxLength(25)]
     [Column("nombre")]
     public string Nombre { get; set; } = default!;
-    public virtual IList<Compra> Compras { get; internal set; } = [];
+
+    [Required]
+    [MaxLength(5)]
+    [Column("simbolo")]
+    public string Simbolo { get; set; } = default!;
 }

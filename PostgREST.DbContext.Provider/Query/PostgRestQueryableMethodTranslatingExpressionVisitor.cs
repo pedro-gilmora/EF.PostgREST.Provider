@@ -1145,7 +1145,8 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
     /// <summary>
     /// Extracts a collection value for IN filters. Handles both constant
-    /// collections and parameterized ones.
+    /// collections and parameterized ones, as well as closure-captured local
+    /// variables that EF Core exposes as <see cref="MemberExpression"/> nodes.
     /// </summary>
     private static bool TryExtractCollectionValue(
         Expression expression,
@@ -1168,6 +1169,20 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         {
             value = constant.Value;
             return true;
+        }
+
+        // Closure-captured local variable: evaluate the expression at translation time.
+        if (expression is MemberExpression or UnaryExpression { NodeType: ExpressionType.Convert })
+        {
+            try
+            {
+                value = Expression.Lambda(expression).Compile().DynamicInvoke();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         return false;

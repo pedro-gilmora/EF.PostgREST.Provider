@@ -25,4 +25,6 @@ public class AppDbContext(string baseUrl) : Microsoft.EntityFrameworkCore.DbCont
     public DbSet<Compra> Compra { get; set; } = null!;
 
     public DbSet<Categoria> Categoria { get; set; } = null!;
-    public DbSet<Persona> Persona { get; set; } = null!;}
+    public DbSet<Persona> Persona { get; set; } = null!;
+    public DbSet<UnidadMedida> UnidadMedida { get; set; } = null!;
+}
