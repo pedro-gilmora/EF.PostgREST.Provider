@@ -57,17 +57,16 @@ public class PostgRestShapedQueryCompilingExpressionVisitor(ShapedQueryCompiling
         // 5. Build expression: new PostgRestQueryingEnumerable<T>(context, entityType, ...)
         var enumerableType = typeof(PostgRestQueryingEnumerable<>).MakeGenericType(elementType);
         var constructor = enumerableType.GetConstructors()[0];
-
+        var colsTreeCopy = new ColumnsTree();
+        queryExpression.SelectColumns.ForEach(r => colsTreeCopy.Add(r));
         return Expression.New(
             constructor,
-            Expression.Convert(
-                QueryCompilationContext.QueryContextParameter,
-                typeof(PostgRestQueryContext)),
+            Expression.Convert(QueryCompilationContext.QueryContextParameter, typeof(PostgRestQueryContext)),
             Expression.Constant(queryExpression.EntityType),
             Expression.Constant(queryExpression.TableName),
             Expression.Constant(queryExpression.Filters.ToList(), typeof(IReadOnlyList<PostgRestFilter>)),
             Expression.Constant(queryExpression.OrFilters.ToList(), typeof(IReadOnlyList<PostgRestOrFilter>)),
-            Expression.Constant(queryExpression.SelectColumns.ToList(), typeof(IReadOnlyList<string>)),
+            Expression.Constant(colsTreeCopy, typeof(ColumnsTree)),
             Expression.Constant(queryExpression.OrderByClauses.ToList(), typeof(IReadOnlyList<PostgRestOrderByClause>)),
             Expression.Constant(queryExpression.Offset, typeof(int?)),
             Expression.Constant(queryExpression.OffsetParameterName, typeof(string)),

@@ -1,9 +1,20 @@
-using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage;
+
 using PosgREST.DbContext.Provider.Core;
 
+using System.Diagnostics.CodeAnalysis;
+using System.Linq.Expressions;
+using System.Text;
+
 namespace PosgREST.DbContext.Provider.Core.Query;
+
+/// <summary>
+/// Captures metadata for an eager-loaded navigation property (<c>Include</c>).
+/// </summary>
+/// <param name="Navigation">The EF Core navigation descriptor.</param>
+/// <param name="TableName">The PostgREST endpoint name for the related entity.</param>
+public sealed record IncludeInfo(INavigation Navigation, string TableName);
 
 /// <summary>
 /// Custom expression node representing a PostgREST query.
@@ -34,7 +45,7 @@ public sealed class PostgRestQueryExpression(IEntityType entityType) : Expressio
     /// Vertical filtering columns (<c>?select=col1,col2</c>).
     /// When empty, all columns are returned.
     /// </summary>
-    public List<string> SelectColumns { get; } = [];
+    public List<ColumnsTree> SelectColumns { get; } = [];
 
     /// <summary>Ordering clauses (<c>?order=col.asc,col2.desc</c>).</summary>
     public List<PostgRestOrderByClause> OrderByClauses { get; } = [];
@@ -71,4 +82,59 @@ public sealed class PostgRestQueryExpression(IEntityType entityType) : Expressio
 
     /// <summary>Replaces all ordering clauses.</summary>
     public void ClearOrderBy() => OrderByClauses.Clear();
+}
+
+public class ColumnsTree(string? identifier = null, bool isRelation = false) : HashSet<ColumnsTree>(new ColumnsComparer())
+{
+    public string ColumnName { get; set; } = identifier!;
+
+    public string MemberName { get; set; } = null!;
+
+    public bool IsRelation { get; set; } = isRelation;
+
+    public bool IsCollection { get; internal set; }
+
+    public IEntityType TargetEntityType { get; internal set; } = null!;
+
+    public void Process(StringBuilder sb)
+    {
+        var addComma = false;
+
+        var hasScalarColumns = false;
+
+        foreach (var item in this.OrderBy(i => i.IsRelation))
+        {
+            if (item.ColumnName is null) continue;
+
+            if (addComma) sb.Append(','); else addComma = true;
+
+            if (item.IsRelation)
+            {
+                if (!hasScalarColumns) { hasScalarColumns = true; sb.Append("*,"); }
+            }
+            else
+                hasScalarColumns = true;
+
+            sb.Append(item.ColumnName);
+
+            if (!item.IsRelation) continue;
+
+            sb.Append('(');
+            if (item.Count > 0) item.Process(sb); else sb.Append('*');
+            sb.Append(')');
+        }
+    }
+}
+
+internal class ColumnsComparer : IEqualityComparer<ColumnsTree>
+{
+    public bool Equals(ColumnsTree? x, ColumnsTree? y)
+    {
+        return ReferenceEquals(x, y) || Equals(x?.ColumnName, y?.ColumnName);
+    }
+
+    public int GetHashCode([DisallowNull] ColumnsTree obj)
+    {
+        return obj.ColumnName.GetHashCode();
+    }
 }

@@ -87,13 +87,13 @@ public class SelectProjectionTests
             .OrderBy(c => c.Id)
             .Take(3)
             .Select(c => ValueTuple.Create(c.Id, c.Nombre))
-            .ToListAsync();
+            .ToListAsync<(int id, string name)>();
 
         Assert.NotEmpty(tuples);
         Assert.All(tuples, t =>
         {
-            Assert.True(t.Item1 > 0);
-            Assert.NotNull(t.Item2);
+            Assert.True(t.id > 0);
+            Assert.NotNull(t.name);
         });
     }
 

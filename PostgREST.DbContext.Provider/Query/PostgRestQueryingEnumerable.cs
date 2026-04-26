@@ -25,7 +25,7 @@ public sealed class PostgRestQueryingEnumerable<T>(
     string tableName,
     IReadOnlyList<PostgRestFilter> filters,
     IReadOnlyList<PostgRestOrFilter> orFilters,
-    IReadOnlyList<string> selectColumns,
+    ColumnsTree selectColumns,
     IReadOnlyList<PostgRestOrderByClause> orderByClauses,
     int? offset,
     string? offsetParameterName,
@@ -38,7 +38,7 @@ public sealed class PostgRestQueryingEnumerable<T>(
     private readonly string _tableName = tableName;
     private readonly IReadOnlyList<PostgRestFilter> _filters = filters;
     private readonly IReadOnlyList<PostgRestOrFilter> _orFilters = orFilters;
-    private readonly IReadOnlyList<string> _selectColumns = selectColumns;
+    private readonly ColumnsTree _selectColumns = selectColumns;
     private readonly IReadOnlyList<PostgRestOrderByClause> _orderByClauses = orderByClauses;
     private readonly int? _offset = offset;
     private readonly string? _offsetParameterName = offsetParameterName;
@@ -62,9 +62,7 @@ public sealed class PostgRestQueryingEnumerable<T>(
     {
         StringBuilder urlBuilder = new ();
 
-        // Vertical filtering: ?select=col1,col2
-        if (_selectColumns.Count > 0)
-            urlBuilder.Append(GetSeparator()).Append("select=").AppendJoin(",", _selectColumns);
+        _selectColumns.Process(urlBuilder.Append(GetSeparator()).Append("select="));
 
         // Horizontal filters: ?column=op.value
         foreach (var filter in _filters)
@@ -182,6 +180,8 @@ public sealed class PostgRestQueryingEnumerable<T>(
                 _enumerable._queryContext.CurrentJsonElement = element;
                 var valueBuffer = PostgRestQueryingEnumerable<T>.CreateValueBuffer(element, _properties!);
                 Current = _enumerable._shaper(_enumerable._queryContext, valueBuffer);
+                if (_enumerable._selectColumns.Where(i => i.IsRelation).ToList() is { Count: > 0 } includes)
+                    PostgRestNestedCollectionHelper.PopulateIncludes(Current, element, includes);
                 return true;
             }
 
@@ -238,6 +238,8 @@ public sealed class PostgRestQueryingEnumerable<T>(
                 _enumerable._queryContext.CurrentJsonElement = element;
                 var valueBuffer = PostgRestQueryingEnumerable<T>.CreateValueBuffer(element, _properties!);
                 Current = _enumerable._shaper(_enumerable._queryContext, valueBuffer);
+                if (_enumerable._selectColumns.Where(i => i.IsRelation).ToList() is { Count: > 0 } includes)
+                    PostgRestNestedCollectionHelper.PopulateIncludes(Current, element, includes);
                 return true;
             }
 

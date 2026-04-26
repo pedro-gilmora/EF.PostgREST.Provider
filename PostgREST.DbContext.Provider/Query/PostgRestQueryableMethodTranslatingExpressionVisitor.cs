@@ -1,13 +1,18 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Internal;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.VisualBasic.FileIO;
 
 using System.Collections;
 using System.Data.Common;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Text;
+using System.Xml.Linq;
 
 namespace PosgREST.DbContext.Provider.Core.Query;
 
@@ -27,7 +32,6 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             queryCompilationContext,
             subquery)
 {
-
     /// <inheritdoc />
     protected override QueryableMethodTranslatingExpressionVisitor CreateSubqueryVisitor()
         => new PostgRestQueryableMethodTranslatingExpressionVisitor(
@@ -161,8 +165,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
         ((PostgRestQueryExpression)source.QueryExpression).Limit = 1;
 
-        return source.UpdateResultCardinality(
-            returnDefault ? ResultCardinality.SingleOrDefault : ResultCardinality.Single);
+        return source.UpdateResultCardinality(returnDefault ? ResultCardinality.SingleOrDefault : ResultCardinality.Single);
     }
 
     /// <inheritdoc />
@@ -215,6 +218,14 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
     //  Unsupported — return null for client eval
     // ──────────────────────────────────────────────
 
+    record StackState(
+        ColumnsTree Columns,
+        ShapedQueryExpression Source,
+        ParameterExpression Parameter,
+        IEntityType CurrentTargetEntitytType);
+
+    StackState? stackState;
+
     /// <summary>
     /// Translates <c>.Select(e =&gt; projection)</c> into PostgREST vertical filtering
     /// (<c>?select=col1,col2</c>) and builds a server-side shaper that directly
@@ -246,6 +257,227 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         ShapedQueryExpression source,
         LambdaExpression selector)
     {
+        var oldStackState = stackState;
+
+        var queryExpression = (PostgRestQueryExpression)source.QueryExpression;
+        stackState = new([],
+                         source,
+                         selector.Parameters[0],
+                         queryExpression.EntityType);
+
+        // ── 1. Handle IncludeExpression ──────────────────────────────────────
+        //
+        // Each .Include(e => e.Nav) call arrives as a separate TranslateSelect
+        // invocation whose selector.Body is a single IncludeExpression:
+        //
+        //   IncludeExpression(Ventas)          ← selector.Body
+        //     └─ EntityExpression: p           ← the entity parameter
+        //
+        // Multiple .Include() calls therefore produce multiple TranslateSelect
+        // calls in sequence — they are NOT nested.  We must NOT clear
+        // SelectColumns here; we only add the new navigation node so that
+        // columns accumulated by earlier Include calls are preserved.
+        //
+        // ThenInclude IS nested: Include(Include(p, Nav1), Nav2).
+        // The while-loop handles that by walking inward until the bare entity
+        // parameter is reached.
+        Expression newShaperExpression;
+        Expression bodyToVisit = selector.Body;
+
+        if (bodyToVisit is IncludeExpression)
+        {
+            // ── Include / ThenInclude path ───────────────────────────────────
+            // Walk the (potentially nested ThenInclude) chain.
+            while (bodyToVisit is IncludeExpression include)
+            {
+                if (include.Navigation is { TargetEntityType.TableName: string navName, IsCollection: var isCollection, Name: var memberName } nav)
+                {
+                    stackState.Columns.Add(new ColumnsTree(navName, isRelation: true)
+                    {
+                        TargetEntityType = nav.TargetEntityType,
+                        MemberName = memberName,
+                        IsCollection = isCollection
+                    });
+                }
+                bodyToVisit = include.EntityExpression;
+            }
+
+            foreach (var item in stackState.Columns)
+            {
+                queryExpression.SelectColumns.Add(item);
+            }
+            // Shaper is unchanged — entity is still returned as-is.
+            newShaperExpression = source.ShaperExpression;
+        }
+        else
+        {
+            // ── Real projection path ─────────────────────────────────────────
+            // A fresh Select() redefines the entire column set, so clear first.
+            stackState.Columns.Clear();
+
+            // Collect scalar / navigation-chain column references.
+            Visit(bodyToVisit);
+
+            foreach (var item in stackState.Columns)
+            {
+                queryExpression.SelectColumns.Add(item);
+            }
+
+            // Inline the entity shaper so base-class visitors can materialise
+            // each projected member (anonymous type, DTO, scalar, tuple, …).
+            //
+            //   e.g.   e => new { e.Id, e.Nombre }
+            //   =>     new { Id     = StructuralTypeShaperExpression(…, vb).Id,
+            //                Nombre = StructuralTypeShaperExpression(…, vb).Nombre }
+            newShaperExpression = ReplacingExpressionVisitor.Replace(stackState.Parameter, source.ShaperExpression, bodyToVisit);
+        }
+
+        stackState = oldStackState;
+
+        return source.UpdateShaperExpression(newShaperExpression);
+    }
+
+    protected override Expression VisitMethodCall(MethodCallExpression node)
+    {
+        // Handle e.Collection.Select(i => projection)
+        // Supports both extension-method form (Enumerable.Select) and instance form.
+        if (stackState != null)
+        {
+            // Handle e.Collection.Select(i => projection)
+            // Supports both extension-method form (Enumerable.Select) and instance form.
+            if ((node.Method.DeclaringType == typeof(Enumerable) || node.Method.DeclaringType == typeof(Queryable)))
+            {
+                var call = node;
+
+                if (node.Method.Name == "ToList" && node.Arguments[0] is MethodCallExpression innerCall)
+                    call = innerCall;
+
+                // Static extension form: Enumerable.Select(source, selector)
+                if (call.Arguments.Count == 2)
+                {
+                    var source = call.Arguments[0];
+
+                    while (source is not EntityQueryRootExpression && source is MethodCallExpression { Arguments: [{ } _s, ..] })
+                        source = _s;
+
+                    var lambda = call.Arguments[1] is UnaryExpression unary
+                        ? unary.Operand as LambdaExpression
+                        : call.Arguments[1] as LambdaExpression;
+
+                    if (source is EntityQueryRootExpression { EntityType: { TableName: string sourceName } entityType }
+                        && lambda is not null
+                        && stackState.CurrentTargetEntitytType.GetNavigations().FirstOrDefault(n => n.ColumnName == sourceName || n.TargetEntityType.TableName == sourceName)?.Name is { } prop)
+                    {
+                        var oldStackState = stackState;
+
+                        stackState = new StackState(new(sourceName, true) { MemberName = prop }, CreateShapedQueryExpression(entityType), lambda.Parameters[0], entityType);
+
+                        ////// Capture the visited body so deeper nesting is rewritten and the
+                        ////// resulting lambda remains fully reducible (no dangling sub-trees).
+                        //var newShaperExpression = ReplacingExpressionVisitor.Replace(
+                        //    _currentEntityParam, source.ShaperExpression, bodyToVisit);
+                        var reducedBody = Visit(lambda.Body);
+                        //var entry = innerExtractor.Columns.Count > 0
+                        //    ? $"{sourceName}({string.Join(",", innerExtractor.Columns)})"
+                        //    : sourceName;
+
+                        oldStackState.Columns.Add(stackState.Columns);
+                        //if (!Columns.Contains(entry))
+                        //    Columns.Add(entry);
+                        var shapedExpression = CreateShapedQueryExpression(entityType);
+                        var newShaperExpression = ReplacingExpressionVisitor.Replace(stackState.Parameter, shapedExpression.ShaperExpression, reducedBody);
+
+                        stackState = oldStackState;
+
+                        // Rebuild the lambda with the visited (reducible) body so any
+                        // further expression rewriting by EF Core can traverse the tree
+                        // without encountering unprocessed sub-expressions.
+                        return Expression.Call(node.Method, Expression.Call(call.Method, call.Arguments[0], Expression.Lambda(newShaperExpression, lambda.Parameters[0])));
+                    }
+                }
+            }
+            else
+            {
+                var arguments = node.Arguments.ToArray();
+
+                for (int i = 0; i < arguments.Length; i++)
+                {
+                    arguments[i] = Visit(arguments[i]);
+                }
+                
+                if (node.Method.IsStatic)
+                {
+                    return Expression.Call(node.Method, arguments);
+                }
+                else
+                {
+                    var obj = Visit(node.Object);
+                    return Expression.Call(obj, node.Method, arguments);
+                }
+
+                //void LookMemberAccesses(Expression expr)
+                //{
+                //    if (expr is MemberExpression { Expression:{ } mExpr } memberExpr)
+                //    {
+                //        LookMemberAccesses(mExpr);
+                //    }
+                //    else if (expr is MethodCallExpression methodCall)
+                //    {
+                //        foreach (var arg in methodCall.Arguments)
+                //            LookMemberAccesses(arg);
+                //    }
+                //}
+            }
+        }
+
+        return base.VisitMethodCall(node);
+    }
+
+    protected override Expression VisitMember(MemberExpression node)
+    {
+        // e.PropertyName → direct scalar column reference
+        if (stackState != null)
+        {
+            if (node.Expression == stackState.Parameter)
+            {
+                if (stackState.CurrentTargetEntitytType.FindProperty(node.Member.Name) is { IsCollection: var isCollection, PropertyInfo.PropertyType: var propType, FieldInfo.FieldType: var fieldType } prop)
+                {
+                    stackState.Columns.Add(new ColumnsTree { ColumnName = prop.ColumnName, MemberName = node.Member.Name, TargetEntityType = stackState.CurrentTargetEntitytType, IsCollection = isCollection });
+                }
+                // Do NOT recurse further — the target IS the entity param.
+                var newNode = ReplacingExpressionVisitor.Replace(node.Expression, stackState.Source.ShaperExpression, node);
+                return newNode;
+            }
+
+            // e.Navigation.Property → nested column inside a relation node
+            if (node.Expression is MemberExpression navExpr && navExpr.Expression == stackState.Parameter)
+            {
+                if (stackState.CurrentTargetEntitytType.FindNavigation(navExpr.Member.Name) is { IsCollection: var isCollection, TargetEntityType.TableName: { } navColName })
+                {
+                    // Find or create the relation ColumnsTree node for this navigation.
+                    var relationNode = stackState.Columns.FirstOrDefault(n => n.ColumnName == navColName);
+                    if (relationNode is null)
+                    {
+                        relationNode = new ColumnsTree(navColName, isRelation: true) { MemberName = navExpr.Member.Name, TargetEntityType = stackState.CurrentTargetEntitytType, IsCollection = isCollection };
+                        stackState.Columns.Add(relationNode);
+                    }
+
+                    if (relationNode.TargetEntityType.FindProperty(node.Member.Name) is { IsCollection: var isCollection2 } innerProp)
+                    {
+                        relationNode.Add(new ColumnsTree { ColumnName = innerProp.ColumnName, MemberName = navExpr.Member.Name, TargetEntityType = stackState.CurrentTargetEntitytType, IsCollection = isCollection2 });
+                    }
+                }
+                return node;
+            }
+        }
+
+        return base.VisitMember(node);
+    }
+
+    protected ShapedQueryExpression TranslateSelect1(
+        ShapedQueryExpression source,
+        LambdaExpression selector)
+    {
         var queryExpression = (PostgRestQueryExpression)source.QueryExpression;
         var entityParam = selector.Parameters[0];
 
@@ -257,7 +489,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             // Replace (don't append) — a fresh Select always redefines the projection.
             queryExpression.SelectColumns.Clear();
             foreach (var col in referencedColumns.Distinct())
-                queryExpression.SelectColumns.Add(col);
+                queryExpression.SelectColumns.Add(new(col));
         }
 
         // ── 2. Build new shaper by inlining the entity shaper into the selector ──
@@ -361,7 +593,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
                         ? unary.Operand as LambdaExpression
                         : node.Arguments[1] as LambdaExpression;
 
-                    if (source is EntityQueryRootExpression { EntityType :{ TableName: string sourceName } entityType }
+                    if (source is EntityQueryRootExpression { EntityType: { TableName: string sourceName } entityType }
                         && lambda is not null)
                     {
                         var innerParam = lambda.Parameters[0];
@@ -399,8 +631,8 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
     /// <inheritdoc />
     protected override ShapedQueryExpression? TranslateAll(
-        ShapedQueryExpression source,
-        LambdaExpression predicate) => null;
+    ShapedQueryExpression source,
+    LambdaExpression predicate) => null;
 
     /// <inheritdoc />
     protected override ShapedQueryExpression? TranslateAny(
@@ -915,7 +1147,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         }
 
         // null == column or null != column
-        if (TryExtractPropertyName(binary.Right, entityParam, out propName) && (column = entityType.GetProperty(propName)?.ColumnName) is { } 
+        if (TryExtractPropertyName(binary.Right, entityParam, out propName) && (column = entityType.GetProperty(propName)?.ColumnName) is { }
             && IsNullConstant(binary.Left))
         {
             filter = new PostgRestFilter
@@ -1081,7 +1313,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         if (call.Method.Name == nameof(IList.Contains)
             && call.Arguments.Count == 1
             && call.Object is not null
-            && TryExtractPropertyName(call.Arguments[0], entityParam, out propName) && (inColumn = entityType.GetProperty(propName)?.ColumnName) is { } 
+            && TryExtractPropertyName(call.Arguments[0], entityParam, out propName) && (inColumn = entityType.GetProperty(propName)?.ColumnName) is { }
             && TryExtractCollectionValue(call.Object, out collectionValue, out collectionParamName, out collectionIsParam))
         {
             filter = new PostgRestFilter

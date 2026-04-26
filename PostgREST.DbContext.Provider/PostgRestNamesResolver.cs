@@ -47,5 +47,19 @@ internal static class PostgRestNamesResolver
         }
     }
 
+    extension(INavigation property)
+    {
+        public string ColumnName
+        {
+            get
+            {
+                return property.FindAnnotation("Relational:ColumnName")?.Value?.ToString()
+                    ?? property.PropertyInfo?.GetCustomAttribute<ColumnAttribute>()?.Name
+                    ?? property.Name;
+
+            }
+        }
+    }
+
 
 }

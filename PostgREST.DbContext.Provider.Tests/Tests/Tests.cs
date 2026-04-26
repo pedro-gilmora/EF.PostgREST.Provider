@@ -182,6 +182,15 @@ public class Tests
 
         Assert.Empty(remaining);
     }
+    [Fact]
+    public async Task LoadIncludes()
+    {
+        using var ctx = new AppDbContext(BaseUrl);
+
+        var productos = await ctx.Producto.Include(p => p.Compras).Include(p => p.Ventas).ToListAsync();
+
+
+    }
 }
 
 internal class PurchaseDto

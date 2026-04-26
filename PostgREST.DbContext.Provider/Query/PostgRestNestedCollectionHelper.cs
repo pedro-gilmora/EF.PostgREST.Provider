@@ -1,3 +1,5 @@
+using System.Collections;
+using System.Reflection;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Query;
@@ -11,6 +13,80 @@ namespace PosgREST.DbContext.Provider.Core.Query;
 /// </summary>
 public static class PostgRestNestedCollectionHelper
 {
+    /// <summary>
+    /// Populates navigation collection properties on <paramref name="entity"/>
+    /// from the embedded JSON arrays produced by PostgREST when
+    /// <c>?select=*,nav(*)</c> is used.
+    /// </summary>
+    public static void PopulateIncludes<T>(T entity, JsonElement parentElement, List<ColumnsTree> includes)
+    {
+        if (entity is null) return;
+
+        foreach (var include in includes)
+        {
+            var tableName = include.ColumnName;
+            var clrNav = entity.GetType().GetProperty(include.MemberName, BindingFlags.Public | BindingFlags.Instance);
+
+            if (clrNav is null || !clrNav.CanWrite && !typeof(IList).IsAssignableFrom(clrNav.PropertyType))
+                continue;
+
+            var targetClrType = include.TargetEntityType.ClrType;
+            var properties = include.TargetEntityType.GetProperties().ToList();
+
+            if (!parentElement.TryGetProperty(tableName, out var array)
+                || array.ValueKind != JsonValueKind.Array)
+                continue;
+
+            if (include.IsCollection)
+            {
+                // Build a List<TTarget> and assign / populate the existing collection
+                var listType = typeof(List<>).MakeGenericType(targetClrType);
+                var list = (IList)Activator.CreateInstance(listType)!;
+                foreach (var element in array.EnumerateArray())
+                    list.Add(MaterializeEntity(element, properties, targetClrType));
+
+                if (clrNav.CanWrite)
+                    clrNav.SetValue(entity, list);
+                else
+                {
+                    // Navigation is a readonly ICollection<T> — try to populate via Add
+                    var existing = clrNav.GetValue(entity) as IList;
+                    if (existing is not null)
+                        foreach (var item in list)
+                            existing.Add(item);
+                }
+            }
+            else
+            {
+                // Single reference navigation
+                if (array.GetArrayLength() > 0)
+                {
+                    var related = MaterializeEntity(array[0], properties, targetClrType);
+                    if (clrNav.CanWrite)
+                        clrNav.SetValue(entity, related);
+                }
+            }
+        }
+    }
+
+    private static object MaterializeEntity(JsonElement element, IReadOnlyList<IProperty> properties, Type clrType)
+    {
+        var entity = Activator.CreateInstance(clrType)!;
+        foreach (var prop in properties)
+        {
+            if (!element.TryGetProperty(prop.ColumnName, out var jsonProp)
+                || jsonProp.ValueKind == JsonValueKind.Undefined)
+                continue;
+
+            var clrProp = clrType.GetProperty(prop.Name);
+            if (clrProp is null || !clrProp.CanWrite)
+                continue;
+
+            clrProp.SetValue(entity, ConvertJsonValue(jsonProp, prop.ClrType));
+        }
+        return entity;
+    }
+
     /// <summary>
     /// Reads the nested JSON array at <paramref name="propertyName"/> from
     /// <c>queryContext.CurrentJsonElement</c>, materializes each element as
