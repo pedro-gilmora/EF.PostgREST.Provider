@@ -27,7 +27,8 @@ public class Tests
     {
         using var ctx = new AppDbContext(BaseUrl);
 
-        var productos = await ctx.Producto.Select(p => new ProductDto 
+        var productos = await ctx.Producto.Select(p => 
+            new ProductDto 
             { 
                 Id = p.Id, 
                 Name = p.Nombre, 
@@ -188,8 +189,6 @@ public class Tests
         using var ctx = new AppDbContext(BaseUrl);
 
         var productos = await ctx.Producto.Include(p => p.Compras).Include(p => p.Ventas).ToListAsync();
-
-
     }
 }
 
@@ -209,5 +208,5 @@ internal class ProductDto
 {
     public int Id { get; set; }
     public string Name { get; set; }
-    public List<PurchaseDto> Purchases { get; internal set; }
+    public List<PurchaseDto> Purchases { get; internal set; } = [];
 }

@@ -1,11 +1,18 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Storage;
 
 using PosgREST.DbContext.Provider.Core;
 
+using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 
 namespace PosgREST.DbContext.Provider.Core.Query;
 
@@ -28,7 +35,6 @@ public sealed record IncludeInfo(INavigation Navigation, string TableName);
 /// </remarks>
 public sealed class PostgRestQueryExpression(IEntityType entityType) : Expression
 {
-
     /// <summary>The entity type this query targets.</summary>
     public IEntityType EntityType { get; } = entityType;
 
@@ -45,7 +51,7 @@ public sealed class PostgRestQueryExpression(IEntityType entityType) : Expressio
     /// Vertical filtering columns (<c>?select=col1,col2</c>).
     /// When empty, all columns are returned.
     /// </summary>
-    public List<ColumnsTree> SelectColumns { get; } = [];
+    public ColumnsTree SelectColumns { get; } = [];
 
     /// <summary>Ordering clauses (<c>?order=col.asc,col2.desc</c>).</summary>
     public List<PostgRestOrderByClause> OrderByClauses { get; } = [];
@@ -62,11 +68,14 @@ public sealed class PostgRestQueryExpression(IEntityType entityType) : Expressio
     /// <summary>Parameter name for a runtime-resolved limit value.</summary>
     public string? LimitParameterName { get; set; }
 
+    internal Type _type = entityType.ClrType;
     /// <inheritdoc />
-    public override Type Type => typeof(ValueBuffer);
+    public override Type Type => _type;
 
     /// <inheritdoc />
     public override ExpressionType NodeType => ExpressionType.Extension;
+
+    public LambdaExpression? Projector { get; internal set; }
 
     /// <inheritdoc />
     protected override Expression VisitChildren(ExpressionVisitor visitor) => this;
@@ -86,15 +95,23 @@ public sealed class PostgRestQueryExpression(IEntityType entityType) : Expressio
 
 public class ColumnsTree(string? identifier = null, bool isRelation = false) : HashSet<ColumnsTree>(new ColumnsComparer())
 {
-    public string ColumnName { get; set; } = identifier!;
-
-    public string MemberName { get; set; } = null!;
+    public string Identifier { get; set; } = identifier!;
 
     public bool IsRelation { get; set; } = isRelation;
 
     public bool IsCollection { get; internal set; }
 
-    public IEntityType TargetEntityType { get; internal set; } = null!;
+    public Func<object, object?>? GetValue { get; internal set; }
+
+    public Action<object, object?>? SetValue { get; internal set; }
+    
+#pragma warning disable CS8618 
+    public IEntityType OwningEntity { get; internal set; }
+
+    public Type ClrType { get; internal set; }
+    public Type? CollectionType { get; internal set; }
+
+#pragma warning restore CS8618
 
     public void Process(StringBuilder sb)
     {
@@ -104,7 +121,7 @@ public class ColumnsTree(string? identifier = null, bool isRelation = false) : H
 
         foreach (var item in this.OrderBy(i => i.IsRelation))
         {
-            if (item.ColumnName is null) continue;
+            if (item.Identifier is null) continue;
 
             if (addComma) sb.Append(','); else addComma = true;
 
@@ -115,7 +132,7 @@ public class ColumnsTree(string? identifier = null, bool isRelation = false) : H
             else
                 hasScalarColumns = true;
 
-            sb.Append(item.ColumnName);
+            sb.Append(item.Identifier);
 
             if (!item.IsRelation) continue;
 
@@ -130,11 +147,11 @@ internal class ColumnsComparer : IEqualityComparer<ColumnsTree>
 {
     public bool Equals(ColumnsTree? x, ColumnsTree? y)
     {
-        return ReferenceEquals(x, y) || Equals(x?.ColumnName, y?.ColumnName);
+        return ReferenceEquals(x, y) || Equals(x?.Identifier, y?.Identifier);
     }
 
     public int GetHashCode([DisallowNull] ColumnsTree obj)
     {
-        return obj.ColumnName.GetHashCode();
+        return obj.Identifier.GetHashCode();
     }
 }

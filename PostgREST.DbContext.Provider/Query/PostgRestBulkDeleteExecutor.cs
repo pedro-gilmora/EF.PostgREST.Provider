@@ -150,7 +150,6 @@ public static class PostgRestBulkDeleteExecutor
     {
         StringBuilder urlBuilder = new();
 
-        // Horizontal filters: ?column=op.value
         foreach (var filter in _filters)
         {
             var value = filter.IsParameter

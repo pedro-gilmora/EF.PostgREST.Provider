@@ -1,12 +1,16 @@
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Query;
+using Microsoft.EntityFrameworkCore.Query.Internal;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using PosgREST.DbContext.Provider.Core.Diagnostics;
 using PosgREST.DbContext.Provider.Core.Query;
 using PosgREST.DbContext.Provider.Core.Storage;
+
+using System.Linq.Expressions;
 
 namespace PosgREST.DbContext.Provider.Core.Infrastructure;
 
@@ -71,10 +75,10 @@ public sealed class PostgRestDbContextOptionsExtension : IDbContextOptionsExtens
             .TryAdd<IDatabaseCreator, PostgRestDatabaseCreator>()
             .TryAdd<ITypeMappingSource, PostgRestTypeMappingSource>()
             .TryAdd<LoggingDefinitions, PostgRestLoggingDefinitions>()
+            .TryAdd<IStructuralTypeMaterializerSource, MyMaterializer>()
             .TryAdd<IQueryContextFactory, PostgRestQueryContextFactory>()
             .TryAdd<IQueryableMethodTranslatingExpressionVisitorFactory, PostgRestQueryableMethodTranslatingExpressionVisitorFactory>()
-            .TryAdd<IShapedQueryCompilingExpressionVisitorFactory,
-                PostgRestShapedQueryCompilingExpressionVisitorFactory>()
+            .TryAdd<IShapedQueryCompilingExpressionVisitorFactory, PostgRestShapedQueryCompilingExpressionVisitorFactory>()
             .TryAddCoreServices();
 
         // Register a default HttpClient if the consumer hasn't provided one.
@@ -161,5 +165,15 @@ public sealed class PostgRestDbContextOptionsExtension : IDbContextOptionsExtens
             if (extension.Timeout is { } timeout)
                 debugInfo["PostgREST:Timeout"] = timeout.ToString();
         }
+    }
+}
+
+#pragma warning disable EF1001 // Internal EF Core API usage.
+internal class MyMaterializer(StructuralTypeMaterializerSourceDependencies dependencies) : StructuralTypeMaterializerSource(dependencies)
+#pragma warning restore EF1001 // Internal EF Core API usage.
+{
+    public override Func<MaterializationContext, object> GetMaterializer(IEntityType entityType)
+    {
+        return base.GetMaterializer(entityType);
     }
 }

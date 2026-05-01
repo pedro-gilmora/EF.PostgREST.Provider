@@ -4,14 +4,17 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.VisualBasic;
 using Microsoft.VisualBasic.FileIO;
 
 using System.Collections;
 using System.Data.Common;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Reflection.Metadata;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 using System.Xml.Linq;
 
 namespace PosgREST.DbContext.Provider.Core.Query;
@@ -45,9 +48,11 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         return new ShapedQueryExpression(
             queryExpression,
             new StructuralTypeShaperExpression(
-                entityType,
-                new ProjectionBindingExpression(
-                    queryExpression, new ProjectionMember(), typeof(ValueBuffer)),
+                type: entityType,
+                valueBufferExpression: new ProjectionBindingExpression(
+                    queryExpression,
+                    new ProjectionMember(),
+                    typeof(ValueBuffer)),
                 nullable: false));
     }
 
@@ -224,6 +229,9 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         ParameterExpression Parameter,
         IEntityType CurrentTargetEntitytType);
 
+    static MethodInfo
+        _select = typeof(Enumerable).GetMethods().FirstOrDefault(m => m.Name == "Select" && m.GetParameters().Length == 2)!;
+
     StackState? stackState;
 
     /// <summary>
@@ -281,7 +289,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         // ThenInclude IS nested: Include(Include(p, Nav1), Nav2).
         // The while-loop handles that by walking inward until the bare entity
         // parameter is reached.
-        Expression newShaperExpression;
+        //Expression newShaperExpression;
         Expression bodyToVisit = selector.Body;
 
         if (bodyToVisit is IncludeExpression)
@@ -290,12 +298,24 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             // Walk the (potentially nested ThenInclude) chain.
             while (bodyToVisit is IncludeExpression include)
             {
-                if (include.Navigation is { TargetEntityType.TableName: string navName, IsCollection: var isCollection, Name: var memberName } nav)
+                if (include.Navigation is { TargetEntityType: { TableName: string navName } entityType, IsCollection: var isCollection, Name: var memberName } nav)
                 {
+                    var targetMember = nav.GetMemberInfo(true, true);
+
+                    var (clrType, getValue, setValue) = targetMember switch
+                    {
+                        PropertyInfo { CanWrite: true } p => (p.PropertyType, p.GetValue, p.CanWrite ? p.SetValue : null),
+                        FieldInfo f when !(f.IsStatic || f.IsLiteral || f.IsInitOnly) => (f.FieldType, (Func<object, object?>?)f.GetValue, (Action<object, object?>?)f.SetValue),
+                        _ => throw new MissingMemberException($"Member for {nav} not found")
+                    };
+
                     stackState.Columns.Add(new ColumnsTree(navName, isRelation: true)
                     {
-                        TargetEntityType = nav.TargetEntityType,
-                        MemberName = memberName,
+                        GetValue = getValue,
+                        SetValue = setValue,
+                        ClrType = entityType.ClrType,
+                        CollectionType = clrType,
+                        OwningEntity = queryExpression.EntityType,
                         IsCollection = isCollection
                     });
                 }
@@ -307,324 +327,164 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
                 queryExpression.SelectColumns.Add(item);
             }
             // Shaper is unchanged — entity is still returned as-is.
-            newShaperExpression = source.ShaperExpression;
+            //newShaperExpression = source.ShaperExpression;
         }
         else
         {
-            // ── Real projection path ─────────────────────────────────────────
-            // A fresh Select() redefines the entire column set, so clear first.
-            stackState.Columns.Clear();
+            var parameter = selector.Parameters[0];
+            queryExpression.Projector = (LambdaExpression)new SelectMappingsCollector(parameter, source, stackState.CurrentTargetEntitytType, stackState.Columns, 0).Visit(selector);
+            queryExpression._type = selector.ReturnType;
+            //var newSelector = Expression.Lambda(newBody, selector.Parameters[0]);
+            //var expr = Expression.Convert(queryExpression.EntityParameter, typeof(IEnumerable<>).MakeGenericType(queryExpression.EntityType.ClrType));
+            //var newShapedQuery = Expression.Call(null, _select.MakeGenericMethod(selector.Parameters[0].Type, newSelector.ReturnType), expr, newSelector);
 
-            // Collect scalar / navigation-chain column references.
-            Visit(bodyToVisit);
-
-            foreach (var item in stackState.Columns)
-            {
-                queryExpression.SelectColumns.Add(item);
-            }
-
-            // Inline the entity shaper so base-class visitors can materialise
-            // each projected member (anonymous type, DTO, scalar, tuple, …).
-            //
-            //   e.g.   e => new { e.Id, e.Nombre }
-            //   =>     new { Id     = StructuralTypeShaperExpression(…, vb).Id,
-            //                Nombre = StructuralTypeShaperExpression(…, vb).Nombre }
-            newShaperExpression = ReplacingExpressionVisitor.Replace(stackState.Parameter, source.ShaperExpression, bodyToVisit);
+            queryExpression.SelectColumns.Clear();
+            
+            foreach (var item in stackState.Columns) queryExpression.SelectColumns.Add(item);
+            
+            //return new ShapedQueryExpression(
+            //    queryExpression,
+            //    new StructuralTypeShaperExpression(
+            //        queryExpression.EntityType,
+            //        new ProjectionBindingExpression(newShapedQuery, new ProjectionMember(), typeof(ValueBuffer)),
+            //        nullable: false));
         }
 
         stackState = oldStackState;
 
-        return source.UpdateShaperExpression(newShaperExpression);
+        return source/*.UpdateShaperExpression(newShaperExpression)*/;
     }
 
-    protected override Expression VisitMethodCall(MethodCallExpression node)
+    class SelectMappingsCollector(ParameterExpression parameter, ShapedQueryExpression expression, IEntityType entityType, ColumnsTree selectColumns, int deepCount) : ExpressionVisitor
     {
-        // Handle e.Collection.Select(i => projection)
-        // Supports both extension-method form (Enumerable.Select) and instance form.
-        if (stackState != null)
+        //IPropertyBase? currentSourceMember;
+
+        //internal ParameterExpression ParamSource = Expression.Parameter(entityType.ClrType, "valueBuffer" + (deepCount == 0 ? "" : deepCount));
+
+        protected override Expression VisitMemberInit(MemberInitExpression node)
         {
-            // Handle e.Collection.Select(i => projection)
-            // Supports both extension-method form (Enumerable.Select) and instance form.
-            if ((node.Method.DeclaringType == typeof(Enumerable) || node.Method.DeclaringType == typeof(Queryable)))
+            if (node is { NewExpression: var newExpr, Bindings: { Count: > 0 } bindings })
             {
-                var call = node;
-
-                if (node.Method.Name == "ToList" && node.Arguments[0] is MethodCallExpression innerCall)
-                    call = innerCall;
-
-                // Static extension form: Enumerable.Select(source, selector)
-                if (call.Arguments.Count == 2)
+                List<MemberBinding> newBindings = new(bindings.Count);
+                foreach (var item in bindings)
                 {
-                    var source = call.Arguments[0];
-
-                    while (source is not EntityQueryRootExpression && source is MethodCallExpression { Arguments: [{ } _s, ..] })
-                        source = _s;
-
-                    var lambda = call.Arguments[1] is UnaryExpression unary
-                        ? unary.Operand as LambdaExpression
-                        : call.Arguments[1] as LambdaExpression;
-
-                    if (source is EntityQueryRootExpression { EntityType: { TableName: string sourceName } entityType }
-                        && lambda is not null
-                        && stackState.CurrentTargetEntitytType.GetNavigations().FirstOrDefault(n => n.ColumnName == sourceName || n.TargetEntityType.TableName == sourceName)?.Name is { } prop)
+                    if (item is MemberAssignment assignment)
                     {
-                        var oldStackState = stackState;
-
-                        stackState = new StackState(new(sourceName, true) { MemberName = prop }, CreateShapedQueryExpression(entityType), lambda.Parameters[0], entityType);
-
-                        ////// Capture the visited body so deeper nesting is rewritten and the
-                        ////// resulting lambda remains fully reducible (no dangling sub-trees).
-                        //var newShaperExpression = ReplacingExpressionVisitor.Replace(
-                        //    _currentEntityParam, source.ShaperExpression, bodyToVisit);
-                        var reducedBody = Visit(lambda.Body);
-                        //var entry = innerExtractor.Columns.Count > 0
-                        //    ? $"{sourceName}({string.Join(",", innerExtractor.Columns)})"
-                        //    : sourceName;
-
-                        oldStackState.Columns.Add(stackState.Columns);
-                        //if (!Columns.Contains(entry))
-                        //    Columns.Add(entry);
-                        var shapedExpression = CreateShapedQueryExpression(entityType);
-                        var newShaperExpression = ReplacingExpressionVisitor.Replace(stackState.Parameter, shapedExpression.ShaperExpression, reducedBody);
-
-                        stackState = oldStackState;
-
-                        // Rebuild the lambda with the visited (reducible) body so any
-                        // further expression rewriting by EF Core can traverse the tree
-                        // without encountering unprocessed sub-expressions.
-                        return Expression.Call(node.Method, Expression.Call(call.Method, call.Arguments[0], Expression.Lambda(newShaperExpression, lambda.Parameters[0])));
+                        var right = Visit(assignment.Expression);
+                        newBindings.Add(Expression.Bind(item.Member, right));
                     }
                 }
+                return Expression.MemberInit(newExpr, newBindings);
             }
-            else
-            {
-                var arguments = node.Arguments.ToArray();
-
-                for (int i = 0; i < arguments.Length; i++)
-                {
-                    arguments[i] = Visit(arguments[i]);
-                }
-                
-                if (node.Method.IsStatic)
-                {
-                    return Expression.Call(node.Method, arguments);
-                }
-                else
-                {
-                    var obj = Visit(node.Object);
-                    return Expression.Call(obj, node.Method, arguments);
-                }
-
-                //void LookMemberAccesses(Expression expr)
-                //{
-                //    if (expr is MemberExpression { Expression:{ } mExpr } memberExpr)
-                //    {
-                //        LookMemberAccesses(mExpr);
-                //    }
-                //    else if (expr is MethodCallExpression methodCall)
-                //    {
-                //        foreach (var arg in methodCall.Arguments)
-                //            LookMemberAccesses(arg);
-                //    }
-                //}
-            }
+            return base.VisitMemberInit(node);
         }
-
-        return base.VisitMethodCall(node);
-    }
-
-    protected override Expression VisitMember(MemberExpression node)
-    {
-        // e.PropertyName → direct scalar column reference
-        if (stackState != null)
-        {
-            if (node.Expression == stackState.Parameter)
-            {
-                if (stackState.CurrentTargetEntitytType.FindProperty(node.Member.Name) is { IsCollection: var isCollection, PropertyInfo.PropertyType: var propType, FieldInfo.FieldType: var fieldType } prop)
-                {
-                    stackState.Columns.Add(new ColumnsTree { ColumnName = prop.ColumnName, MemberName = node.Member.Name, TargetEntityType = stackState.CurrentTargetEntitytType, IsCollection = isCollection });
-                }
-                // Do NOT recurse further — the target IS the entity param.
-                var newNode = ReplacingExpressionVisitor.Replace(node.Expression, stackState.Source.ShaperExpression, node);
-                return newNode;
-            }
-
-            // e.Navigation.Property → nested column inside a relation node
-            if (node.Expression is MemberExpression navExpr && navExpr.Expression == stackState.Parameter)
-            {
-                if (stackState.CurrentTargetEntitytType.FindNavigation(navExpr.Member.Name) is { IsCollection: var isCollection, TargetEntityType.TableName: { } navColName })
-                {
-                    // Find or create the relation ColumnsTree node for this navigation.
-                    var relationNode = stackState.Columns.FirstOrDefault(n => n.ColumnName == navColName);
-                    if (relationNode is null)
-                    {
-                        relationNode = new ColumnsTree(navColName, isRelation: true) { MemberName = navExpr.Member.Name, TargetEntityType = stackState.CurrentTargetEntitytType, IsCollection = isCollection };
-                        stackState.Columns.Add(relationNode);
-                    }
-
-                    if (relationNode.TargetEntityType.FindProperty(node.Member.Name) is { IsCollection: var isCollection2 } innerProp)
-                    {
-                        relationNode.Add(new ColumnsTree { ColumnName = innerProp.ColumnName, MemberName = navExpr.Member.Name, TargetEntityType = stackState.CurrentTargetEntitytType, IsCollection = isCollection2 });
-                    }
-                }
-                return node;
-            }
-        }
-
-        return base.VisitMember(node);
-    }
-
-    protected ShapedQueryExpression TranslateSelect1(
-        ShapedQueryExpression source,
-        LambdaExpression selector)
-    {
-        var queryExpression = (PostgRestQueryExpression)source.QueryExpression;
-        var entityParam = selector.Parameters[0];
-
-        // ── 1. Vertical filtering: collect every e.Prop access in the body ──────
-        var referencedColumns = ExtractReferencedColumns(selector.Body, entityParam, queryExpression.EntityType);
-
-        if (referencedColumns.Count > 0)
-        {
-            // Replace (don't append) — a fresh Select always redefines the projection.
-            queryExpression.SelectColumns.Clear();
-            foreach (var col in referencedColumns.Distinct())
-                queryExpression.SelectColumns.Add(new(col));
-        }
-
-        // ── 2. Build new shaper by inlining the entity shaper into the selector ──
-        //
-        //   e.g.   e => new { e.Id, e.Nombre }
-        //   =>     new { Id     = StructuralTypeShaperExpression(Categoria, vb).Id,
-        //                 Nombre = StructuralTypeShaperExpression(Categoria, vb).Nombre }
-        //
-        // The base class VisitShapedQuery then:
-        //   a) ProjectionBindingRemovingVisitor  — vb param replaces ProjectionBinding
-        //   b) InjectStructuralTypeMaterializers — StructuralTypeShaperExpression
-        //      is replaced by the actual CLR materializer lambda call
-        //
-        // Supported projection shapes (non-exhaustive):
-        //   • anonymous type  : e => new { e.Id, e.Name }
-        //   • ValueTuple      : e => (e.Id, e.Name)
-        //   • named tuple     : e => (Id: e.Id, Name: e.Name)
-        //   • custom DTO ctor : e => new PersonDto(e.Id, e.Name)
-        //   • DTO member-init : e => new PersonDto { Id = e.Id, Name = e.Name }
-        //   • scalar member   : e => e.Id
-        //   • nested shapes   : e => new { e.Id, Sub = new { e.Name, e.Age } }
-        var newShaperExpression = ReplacingExpressionVisitor.Replace(
-            entityParam,
-            source.ShaperExpression,
-            selector.Body);
-
-        return source.UpdateShaperExpression(newShaperExpression);
-    }
-
-    // ──────────────────────────────────────────────
-    //  Column extraction helper
-    // ──────────────────────────────────────────────
-
-    /// <summary>
-    /// Returns all lower-cased column names directly accessed via
-    /// <c>entityParam.PropertyName</c> anywhere in <paramref name="body"/>.
-    /// Handles arbitrary nesting of <see cref="NewExpression"/>,
-    /// <see cref="MemberInitExpression"/>, conditional expressions, etc.
-    /// </summary>
-    private static IReadOnlyList<string> ExtractReferencedColumns(
-        Expression body,
-        ParameterExpression entityParam,
-        IEntityType entityType)
-    {
-        var extractor = new ColumnReferenceExtractor(entityParam, entityType);
-        extractor.Visit(body);
-        return extractor.Columns;
-    }
-
-    /// <summary>
-    /// Expression visitor that collects the names of entity properties
-    /// accessed directly on <see cref="_entityParam"/> (i.e. <c>e.Prop</c>).
-    /// Nested projections inside <see cref="NewExpression"/> or
-    /// <see cref="MemberInitExpression"/> nodes are also traversed.
-    /// Collection navigation properties projected via a nested
-    /// <c>.Select(i =&gt; …)</c> are emitted as
-    /// <c>relation(col1,col2,…)</c> to match the PostgREST embedded-resource
-    /// syntax, supporting arbitrary nesting depth.
-    /// </summary>
-    private sealed class ColumnReferenceExtractor(ParameterExpression entityParam, IEntityType entityType) : ExpressionVisitor
-    {
-        private readonly ParameterExpression _entityParam = entityParam;
-
-        /// <summary>Distinct ordered list of accessed column/relation names (lowercase).</summary>
-        public List<string> Columns { get; } = [];
 
         protected override Expression VisitMember(MemberExpression node)
         {
-            // e.PropertyName → direct column reference
-            if (node.Expression == _entityParam)
+            if (node.Expression == parameter)
             {
-                var colName = entityType.GetProperty(node.Member.Name).ColumnName;
-                if (!Columns.Contains(colName))
-                    Columns.Add(colName);
-
-                // Do NOT recurse further — the target IS the entity param.
-                return node;
-            }
-
-            return base.VisitMember(node);
-        }
-
-        protected override Expression VisitMethodCall(MethodCallExpression node)
-        {
-            // Handle e.Collection.Select(i => projection)
-            // Supports both extension-method form (Enumerable.Select) and instance form.
-            if (node.Method.Name == nameof(Enumerable.Select))
-            {
-                Expression? source = null;
-                LambdaExpression? lambda = null;
-
-                // Static extension form: Enumerable.Select(source, selector)
-                if (node.Arguments.Count == 2)
+                if (entityType.FindMember(node.Member.Name) is { IsCollection: var isCollection, ClrType: Type originalClrType } prop)
                 {
-                    source = node.Arguments[0];
+                    var targetMember = prop.GetMemberInfo(true, true);
 
-                    while (source is not EntityQueryRootExpression && source is MethodCallExpression { Arguments: [{ } _s, ..] })
-                        source = _s;
-
-                    lambda = node.Arguments[1] is UnaryExpression unary
-                        ? unary.Operand as LambdaExpression
-                        : node.Arguments[1] as LambdaExpression;
-
-                    if (source is EntityQueryRootExpression { EntityType: { TableName: string sourceName } entityType }
-                        && lambda is not null)
+                    var (clrType, getValue, setValue) = targetMember switch
                     {
-                        var innerParam = lambda.Parameters[0];
+                        PropertyInfo p => (p.PropertyType, p.GetValue, p.CanWrite ? p.SetValue : null),
+                        FieldInfo f when !(f.IsStatic || f.IsLiteral || f.IsInitOnly) => (f.FieldType, (Func<object, object?>?)f.GetValue, (Action<object, object?>?)f.SetValue),
+                        _ => throw new MissingMemberException($"Member for {prop} not found")
+                    };
 
-                        // Recursively extract columns from the nested projection.
-                        // Because ColumnReferenceExtractor handles Select itself,
-                        // arbitrarily deep nesting is resolved automatically.
-                        var innerExtractor = new ColumnReferenceExtractor(innerParam, entityType);
+                    selectColumns.Add(new ColumnsTree(prop.ColumnName)
+                    {
+                        GetValue = getValue,
+                        SetValue = setValue,
+                        ClrType = clrType,
+                        OwningEntity = entityType,
+                        IsCollection = isCollection
+                    });
 
-                        // Capture the visited body so deeper nesting is rewritten and the
-                        // resulting lambda remains fully reducible (no dangling sub-trees).
-                        var reducedBody = innerExtractor.Visit(lambda.Body);
+                    //var targetType = targetMember is PropertyInfo propertyInfo ? propertyInfo.PropertyType : (targetMember as FieldInfo)!.FieldType;
 
-                        var entry = innerExtractor.Columns.Count > 0
-                            ? $"{sourceName}({string.Join(",", innerExtractor.Columns)})"
-                            : sourceName;
+                    //var isSourceNullable = clrType.IsGenericType && clrType.GetGenericTypeDefinition() == typeof(Nullable<>);
 
-                        if (!Columns.Contains(entry))
-                            Columns.Add(entry);
+                    //var underlyingType = isSourceNullable
+                    //    ? Nullable.GetUnderlyingType(clrType)!
+                    //    : clrType;
 
-                        // Rebuild the lambda with the visited (reducible) body so any
-                        // further expression rewriting by EF Core can traverse the tree
-                        // without encountering unprocessed sub-expressions.
-                        var reducedLambda = Expression.Lambda(reducedBody, lambda.Parameters);
-                        var newArgs = node.Arguments.ToArray();
-                        newArgs[^1] = reducedLambda;
-                        return node.Update(node.Object, newArgs);
-                    }
+                    //var jsonProp = Expression.Call(ParamSource, _getPropertyMI, Expression.Constant(prop.ColumnName));
+
+                    //var methodName = underlyingType.Name;
+
+                    //if (underlyingType == typeof(byte[]))
+                    //    methodName = nameof(JsonElement.GetBytesFromBase64);
+
+                    //methodName = "Get" + methodName;
+
+                    //if (typeof(JsonElement).GetMethod(methodName) is not { } jsonMethod) return Expression.Default(underlyingType);
+
+                    //var expr = Expression.Call(jsonProp, jsonMethod);
+
+                    //if (isSourceNullable)
+                    //{
+                    //    return Expression.Condition(
+                    //        Expression.Equal(Expression.MakeMemberAccess(jsonProp, _valueKindProp), Expression.Constant(JsonValueKind.Null)),
+                    //        Expression.Default(targetType),
+                    //        targetType != underlyingType ? Expression.Convert(expr, targetType) : expr);
+                    //}
+
+                    //return expr;
                 }
             }
 
+            return node;
+        }
+
+        //protected override Expression VisitBinary(BinaryExpression node)
+        //{
+        //    if (node.NodeType == ExpressionType.Coalesce)
+        //        return Visit(node.Left);
+        //    return base.VisitBinary(node);
+        //}
+
+        protected override Expression VisitMethodCall(MethodCallExpression node)
+        {
+            if (node.Method.Name == "Select"
+                && node.Arguments is [MethodCallExpression { Arguments: [EntityQueryRootExpression { EntityType: var type } entity, _], } e, UnaryExpression { Operand: LambdaExpression { Parameters: [{ } _param], Body: var body } lambda }]
+                && entityType.GetNavigations().FirstOrDefault(n => n.IsCollection && n.TargetEntityType == type) is { } prop)
+            {
+                var propMemberInfo = prop.GetMemberInfo(false, true);
+
+                var (clrType, getValue, setValue) = propMemberInfo switch
+                {
+                    PropertyInfo { CanWrite: true } p => (p.PropertyType, p.GetValue, p.CanWrite ? p.SetValue : null),
+                    FieldInfo f when !(f.IsStatic || f.IsLiteral || f.IsInitOnly) => (f.FieldType, (Func<object, object?>?)f.GetValue, (Action<object, object?>?)f.SetValue),
+                    _ => throw new MissingMemberException($"Proper assignable member for {prop} not found")
+                };
+
+                ColumnsTree column = new(prop.ColumnName, isRelation: true)
+                {
+                    GetValue = getValue,
+                    SetValue = setValue,
+                    CollectionType = clrType,
+                    ClrType = type.ClrType,
+                    OwningEntity = prop.DeclaringEntityType,
+                    IsCollection = prop.IsCollection
+                };
+
+                selectColumns.Add(column);
+
+                var method = _select.MakeGenericMethod(type.ClrType, node.Method.GetGenericArguments()[1]);
+
+                SelectMappingsCollector innerSelectCollector = new(_param, expression, type, column, deepCount + 1);
+                
+                var newBody = innerSelectCollector.Visit(body);
+
+                // ✅ FIX: Replace [EntityQueryRootExpression].Where(FK) with p.Compras (navigation property)
+                //         so the Projector is executable at runtime against the deserialized JSON entity.
+                var navAccess = Expression.MakeMemberAccess(parameter, propMemberInfo);
+                var newLambda = Expression.Lambda(newBody, _param);
+                return Expression.Call(null, method, navAccess, newLambda);
+            }
             return base.VisitMethodCall(node);
         }
     }

@@ -1,13 +1,19 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Options;
 
 using System.Collections;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace PosgREST.DbContext.Provider.Core.Query;
 
@@ -19,48 +25,89 @@ namespace PosgREST.DbContext.Provider.Core.Query;
 /// <remarks>
 /// Creates a new querying enumerable.
 /// </remarks>
-public sealed class PostgRestQueryingEnumerable<T>(
-    PostgRestQueryContext queryContext,
-    IEntityType entityType,
-    string tableName,
-    IReadOnlyList<PostgRestFilter> filters,
-    IReadOnlyList<PostgRestOrFilter> orFilters,
-    ColumnsTree selectColumns,
-    IReadOnlyList<PostgRestOrderByClause> orderByClauses,
-    int? offset,
-    string? offsetParameterName,
-    int? limit,
-    string? limitParameterName,
-    Func<QueryContext, ValueBuffer, T> shaper) : IEnumerable<T>, IAsyncEnumerable<T>, IQueryingEnumerable
+public sealed class PostgRestQueryingEnumerable<TIn, TOut>(
+    PostgRestQueryContext _queryContext,
+    string _tableName,
+    IReadOnlyList<PostgRestFilter> _filters,
+    IReadOnlyList<PostgRestOrFilter> _orFilters,
+    ColumnsTree _selectColumns,
+    IReadOnlyList<PostgRestOrderByClause> _orderByClauses,
+    int? _offset,
+    string? _offsetParameterName,
+    int? _limit,
+    string? _limitParameterName,
+    Func<QueryContext, TIn, TOut> _selector) : IEnumerable<TOut>, IAsyncEnumerable<TOut>, IQueryingEnumerable
 {
-    private readonly PostgRestQueryContext _queryContext = queryContext;
-    private readonly IEntityType _entityType = entityType;
-    private readonly string _tableName = tableName;
-    private readonly IReadOnlyList<PostgRestFilter> _filters = filters;
-    private readonly IReadOnlyList<PostgRestOrFilter> _orFilters = orFilters;
-    private readonly ColumnsTree _selectColumns = selectColumns;
-    private readonly IReadOnlyList<PostgRestOrderByClause> _orderByClauses = orderByClauses;
-    private readonly int? _offset = offset;
-    private readonly string? _offsetParameterName = offsetParameterName;
-    private readonly int? _limit = limit;
-    private readonly string? _limitParameterName = limitParameterName;
-    private readonly Func<QueryContext, ValueBuffer, T> _shaper = shaper;
+    //private readonly PostgRestQueryContext _queryContext = queryContext;
+    //private readonly string _tableName = tableName;
+    //private readonly IReadOnlyList<PostgRestFilter> _filters = filters;
+    //private readonly IReadOnlyList<PostgRestOrFilter> _orFilters = orFilters;
+    //private readonly ColumnsTree _selectColumns = selectColumns;
+    //private readonly IReadOnlyList<PostgRestOrderByClause> _orderByClauses = orderByClauses;
+    //private readonly int? _offset = offset;
+    //private readonly string? _offsetParameterName = offsetParameterName;
+    //private readonly int? _limit = limit;
+    //private readonly string? _limitParameterName = limitParameterName;
 
     /// <inheritdoc />
-    public IEnumerator<T> GetEnumerator() => new Enumerator(this);
+    public IEnumerator<TOut> GetEnumerator() => new Enumerator(_queryContext, _selector, BuildUrl, GetJsonOptions());
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     /// <inheritdoc />
-    public IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default)
-        => new AsyncEnumerator(this, cancellationToken);
+    public IAsyncEnumerator<TOut> GetAsyncEnumerator(CancellationToken cancellationToken = default) => new AsyncEnumerator(_queryContext, _selector, BuildUrl, GetJsonOptions(), cancellationToken);
 
     /// <inheritdoc />
     public string ToQueryString() => BuildUrl();
 
+    JsonSerializerOptions GetJsonOptions()
+    {
+        var context = new Dictionary<Type, IJsonTypeInfoResolver>();
+
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.General);
+
+        GetTopologicalRelatedEntities(_selectColumns);
+
+        options.TypeInfoResolver = JsonTypeInfoResolver.Combine(context.Values.Concat([new DefaultJsonTypeInfoResolver()]).ToArray());
+
+        void GetTopologicalRelatedEntities(ColumnsTree col)
+        {
+            ref var item = ref CollectionsMarshal.GetValueRefOrAddDefault(context, col.ClrType, out var exists);
+
+            if (exists) return;
+
+            item = new JsonEntityTypeInfoResolver(col);
+
+            bool hasColumns = false;
+
+            foreach (var col2 in col)
+            {
+                if (col2.IsRelation)
+                {
+                    if (!hasColumns)
+                    {
+                        hasColumns = true;
+                        item = new JsonFullEntityTypeInfoResolver(col);
+                    }
+
+                    GetTopologicalRelatedEntities(col2);
+                }
+                else if (!hasColumns) hasColumns = true;
+            }
+
+            if (!hasColumns)
+            {
+                hasColumns = true;
+                item = new JsonFullEntityTypeInfoResolver(col);
+            }
+        }
+
+        return options;
+    }
+
     private string BuildUrl()
     {
-        StringBuilder urlBuilder = new ();
+        StringBuilder urlBuilder = new();
 
         _selectColumns.Process(urlBuilder.Append(GetSeparator()).Append("select="));
 
@@ -89,8 +136,7 @@ public sealed class PostgRestQueryingEnumerable<T>(
 
         if (_orderByClauses.Count > 0)
         {
-            var orderParts = string.Join(",", _orderByClauses);
-            urlBuilder.Append(GetSeparator()).Append("order=").Append(orderParts);
+            urlBuilder.Append(GetSeparator()).Append("order=").AppendJoin(",", _orderByClauses);
         }
 
         var resolvedOffset = _offset
@@ -116,30 +162,6 @@ public sealed class PostgRestQueryingEnumerable<T>(
         char GetSeparator() => urlBuilder.Length > 0 ? '&' : '?';
     }
 
-    private IReadOnlyList<IProperty> GetOrderedProperties()=> [.. _entityType.GetProperties()];
-
-    private static ValueBuffer CreateValueBuffer(JsonElement element, IReadOnlyList<IProperty> properties)
-    {
-        var values = new object?[properties.Count];
-
-        for (var i = 0; i < properties.Count; i++)
-        {
-            var prop = properties[i];
-            var columnName = prop.ColumnName;
-
-            if (element.TryGetProperty(columnName, out var jsonProp)
-                && jsonProp.ValueKind != JsonValueKind.Undefined)
-            {
-                values[i] = ConvertJsonValue(jsonProp, prop.ClrType);
-            }
-        }
-
-        return new ValueBuffer(values);
-    }
-
-    private static object? ConvertJsonValue(JsonElement element, Type targetType)
-        => PostgRestNestedCollectionHelper.ConvertJsonValue(element, targetType);
-
     /// <summary>
     /// Applies common HTTP headers (Accept, Authorization, Schema profiles)
     /// to the given request based on the current query context options.
@@ -155,118 +177,181 @@ public sealed class PostgRestQueryingEnumerable<T>(
             request.Headers.TryAddWithoutValidation("Accept-Profile", schema);
     }
 
-    private sealed class Enumerator(PostgRestQueryingEnumerable<T> enumerable) : IEnumerator<T>
+    private sealed class Enumerator(PostgRestQueryContext queryContext, Func<QueryContext, TIn, TOut> select, Func<string> buildUrl, JsonSerializerOptions jsonSerializerOptions) : IEnumerator<TOut>, ICurrent
     {
-        private readonly PostgRestQueryingEnumerable<T> _enumerable = enumerable;
-        private IReadOnlyList<JsonElement>? _results;
-        private IReadOnlyList<IProperty>? _properties;
-        private int _index = -1;
+        private IEnumerator<TIn>? _results;
 
-        public T Current { get; private set; } = default!;
+        public TOut Current { get; private set; } = default!;
+
+        TOut ICurrent.Current => Current!;
+
         object IEnumerator.Current => Current!;
 
         public bool MoveNext()
         {
             if (_results is null)
             {
-                _enumerable._queryContext.InitializeStateManager(standAlone: false);
-                _results = FetchResults();
-                _properties = _enumerable.GetOrderedProperties();
+                queryContext.InitializeStateManager(standAlone: false);
+
+                if (FetchResults() is not { } result) return false;
+
+                _results = result.GetEnumerator();
             }
 
-            if (++_index < _results.Count)
+            if (_results.MoveNext())
             {
-                var element = _results[_index];
-                _enumerable._queryContext.CurrentJsonElement = element;
-                var valueBuffer = PostgRestQueryingEnumerable<T>.CreateValueBuffer(element, _properties!);
-                Current = _enumerable._shaper(_enumerable._queryContext, valueBuffer);
-                if (_enumerable._selectColumns.Where(i => i.IsRelation).ToList() is { Count: > 0 } includes)
-                    PostgRestNestedCollectionHelper.PopulateIncludes(Current, element, includes);
+                Current = select(queryContext, _results.Current);
                 return true;
             }
 
             return false;
         }
 
-        public void Reset() => _index = -1;
+        public void Reset() => _results?.Reset();
 
-        public void Dispose() { }
+        public void Dispose() { _results?.Dispose(); }
 
-        private IReadOnlyList<JsonElement> FetchResults()
+        private IEnumerable<TIn>? FetchResults()
         {
-            var url = _enumerable.BuildUrl();
+            var url = buildUrl();
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            ApplyHeaders(request, _enumerable._queryContext);
+            ApplyHeaders(request, queryContext);
 
-            using var response = _enumerable._queryContext.HttpClient
+            using var response = queryContext.HttpClient
                 .Send(request, HttpCompletionOption.ResponseContentRead);
 
             PostgRestException.ThrowIfError(response);
 
-            var result = response.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(false).GetAwaiter().GetResult();
-
-            return result.ValueKind == JsonValueKind.Array
-                ? result.EnumerateArray().ToList()
-                : [result];
+            using var stream = response.Content.ReadAsStream();
+            return JsonSerializer.Deserialize<IEnumerable<TIn>>(stream, jsonSerializerOptions);
         }
     }
 
     private sealed class AsyncEnumerator(
-        PostgRestQueryingEnumerable<T> enumerable,
-        CancellationToken cancellationToken) : IAsyncEnumerator<T>
+        PostgRestQueryContext queryContext,
+        Func<QueryContext, TIn, TOut> selector,
+        Func<string> buildUrl,
+        JsonSerializerOptions jsonSerializerOptions,
+        CancellationToken cancellationToken) : IAsyncEnumerator<TOut>, ICurrent
     {
-        private readonly PostgRestQueryingEnumerable<T> _enumerable = enumerable;
         private readonly CancellationToken _cancellationToken = cancellationToken;
-        private IReadOnlyList<JsonElement>? _results;
-        private IReadOnlyList<IProperty>? _properties;
-        private int _index = -1;
+        private ConfiguredCancelableAsyncEnumerable<TIn>.Enumerator _results = default;
 
-        public T Current { get; private set; } = default!;
+        bool init = false;
+
+        public TOut Current { get; private set; } = default!;
 
         public async ValueTask<bool> MoveNextAsync()
         {
-            if (_results is null)
+            if (!init)
             {
-                _enumerable._queryContext.InitializeStateManager(standAlone: false);
-                _results = await FetchResultsAsync().ConfigureAwait(false);
-                _properties = _enumerable.GetOrderedProperties();
+                init = true;
+                queryContext.InitializeStateManager(standAlone: false);
+                await FetchResultsAsync();
             }
 
-            if (++_index < _results.Count)
+            if (await _results.MoveNextAsync())
             {
-                var element = _results[_index];
-                _enumerable._queryContext.CurrentJsonElement = element;
-                var valueBuffer = PostgRestQueryingEnumerable<T>.CreateValueBuffer(element, _properties!);
-                Current = _enumerable._shaper(_enumerable._queryContext, valueBuffer);
-                if (_enumerable._selectColumns.Where(i => i.IsRelation).ToList() is { Count: > 0 } includes)
-                    PostgRestNestedCollectionHelper.PopulateIncludes(Current, element, includes);
+                Current = selector(queryContext, _results.Current);
                 return true;
             }
 
             return false;
         }
 
-        public ValueTask DisposeAsync() => default;
-
-        private async Task<IReadOnlyList<JsonElement>> FetchResultsAsync()
+        public async ValueTask DisposeAsync()
         {
-            var url = _enumerable.BuildUrl();
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            ApplyHeaders(request, _enumerable._queryContext);
+            if (init) await _results.DisposeAsync();
+        }
 
-            using var response = await _enumerable._queryContext.HttpClient
+        private async Task FetchResultsAsync()
+        {
+            var url = buildUrl();
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            ApplyHeaders(request, queryContext);
+
+            var response = await queryContext.HttpClient
                 .SendAsync(request, HttpCompletionOption.ResponseContentRead, _cancellationToken)
                 .ConfigureAwait(false);
 
             await PostgRestException.ThrowIfErrorAsync(response, _cancellationToken)
                 .ConfigureAwait(false);
 
-            var result = await response.Content.ReadFromJsonAsync<JsonElement>(_cancellationToken)
-                .ConfigureAwait(false);
+            _results = response.Content.ReadFromJsonAsAsyncEnumerable<TIn>(jsonSerializerOptions, _cancellationToken)!.ConfigureAwait<TIn>(false).GetAsyncEnumerator();
+        }
+    }
 
-            return result.ValueKind == JsonValueKind.Array
-                ? result.EnumerateArray().ToList()
-                : [result];
+    private interface ICurrent
+    {
+        TOut Current { get; }
+    }
+
+    class JsonEntityTypeInfoResolver(ColumnsTree column) : IJsonTypeInfoResolver
+    {
+        private JsonTypeInfo? typeInfo;
+
+        JsonTypeInfo? IJsonTypeInfoResolver.GetTypeInfo(Type type, JsonSerializerOptions options)
+        {
+            if (type != column.ClrType)
+                return null;
+
+            if (typeInfo != null) return typeInfo;
+
+            typeInfo = JsonTypeInfo.CreateJsonTypeInfo(column.ClrType, options);
+
+            typeInfo.CreateObject ??= () => Activator.CreateInstance(column.ClrType)!;
+
+            foreach (var prop in column)
+            {
+                var jsonProp = typeInfo.CreateJsonPropertyInfo(prop.CollectionType ?? prop.ClrType, prop.Identifier);
+
+                jsonProp.Get = prop.GetValue;
+
+                jsonProp.Set = prop.SetValue;
+
+                typeInfo.Properties.Add(jsonProp);
+            }
+            return typeInfo;
+        }
+    }
+
+    class JsonFullEntityTypeInfoResolver(ColumnsTree column) : IJsonTypeInfoResolver
+    {
+        private JsonTypeInfo? typeInfo;
+
+        JsonTypeInfo? IJsonTypeInfoResolver.GetTypeInfo(Type type, JsonSerializerOptions options)
+        {
+            if (type != column.ClrType)
+                return null;
+
+            if (typeInfo != null) return typeInfo;
+
+            typeInfo = JsonTypeInfo.CreateJsonTypeInfo(column.ClrType, options);
+
+            typeInfo.CreateObject ??= () => Activator.CreateInstance(column.ClrType)!;
+
+            foreach (var targetMember in column.ClrType.GetMembers())
+            {
+                if (targetMember is not { MemberType: MemberTypes.Field or MemberTypes.Property } || column.OwningEntity.FindMember(targetMember.Name)?.ColumnName is not { } columnsName) continue;
+
+                var (memberType, getValue, setValue) = targetMember switch
+                {
+                    PropertyInfo { CanWrite: true } p => (p.PropertyType, p.GetValue, p.CanWrite ? p.SetValue : null),
+                    FieldInfo f when !(f.IsStatic || f.IsLiteral || f.IsInitOnly) => (f.FieldType, (Func<object, object?>?)f.GetValue, (Action<object, object?>?)f.SetValue),
+                    _ => throw new MissingMemberException($"Member for {targetMember} not found")
+                };
+
+                var jsonProp = typeInfo.CreateJsonPropertyInfo(memberType, columnsName);
+
+                jsonProp.Get = getValue;
+
+                jsonProp.Set = setValue;
+
+                typeInfo.Properties.Add(jsonProp);
+            }
+
+            return typeInfo;
         }
     }
 }

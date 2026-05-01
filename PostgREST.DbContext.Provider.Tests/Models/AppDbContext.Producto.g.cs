@@ -24,7 +24,7 @@ public class Producto
     [Column("nombre")]
     public string Nombre { get; set; } = default!;
 
-    public virtual IList<Compra> Compras { get; internal set; } = [];
+    public virtual IList<Compra> Compras { get; internal set; } = [];   
 
     public virtual IList<Venta> Ventas { get; internal set; } = [];
 }

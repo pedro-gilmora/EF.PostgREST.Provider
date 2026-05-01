@@ -1,6 +1,14 @@
-using System.Text.Json;
+using Microsoft.EntityFrameworkCore.ChangeTracking.Internal;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Query;
+using Microsoft.Extensions.Options;
+
 using PosgREST.DbContext.Provider.Core.Infrastructure;
+
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace PosgREST.DbContext.Provider.Core.Query;
 
@@ -16,7 +24,6 @@ public class PostgRestQueryContext(
     HttpClient httpClient,
     PostgRestDbContextOptionsExtension options) : QueryContext(dependencies)
 {
-
     /// <summary>The <see cref="System.Net.Http.HttpClient"/> for PostgREST requests.</summary>
     public HttpClient HttpClient { get; } = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
 
@@ -25,11 +32,4 @@ public class PostgRestQueryContext(
 
     /// <summary>The provider options carrying auth token and schema.</summary>
     public PostgRestDbContextOptionsExtension Options { get; } = options ?? throw new ArgumentNullException(nameof(options));
-
-    /// <summary>
-    /// The raw JSON element for the row currently being materialized.
-    /// Set by the enumerator immediately before invoking the shaper delegate,
-    /// so nested-collection shaper expressions can read embedded arrays from it.
-    /// </summary>
-    public JsonElement CurrentJsonElement { get; set; }
 }

@@ -1,6 +1,8 @@
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Metadata.Internal;
+
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Reflection;
-using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace PosgREST.DbContext.Provider.Core;
 
@@ -33,7 +35,7 @@ internal static class PostgRestNamesResolver
     /// Returns the PostgREST column name for the given property.
     /// </summary>
 
-    extension(IProperty property)
+    extension(IPropertyBase property)
     {
         public string ColumnName
         {
@@ -41,25 +43,11 @@ internal static class PostgRestNamesResolver
             {
                 return property.FindAnnotation("Relational:ColumnName")?.Value?.ToString()
                     ?? property.PropertyInfo?.GetCustomAttribute<ColumnAttribute>()?.Name
-                    ?? property.Name;
+                    ?? (property is INavigation { TargetEntityType.TableName: { } tableName }
+                            ? tableName
+                            : property.Name);
 
             }
         }
     }
-
-    extension(INavigation property)
-    {
-        public string ColumnName
-        {
-            get
-            {
-                return property.FindAnnotation("Relational:ColumnName")?.Value?.ToString()
-                    ?? property.PropertyInfo?.GetCustomAttribute<ColumnAttribute>()?.Name
-                    ?? property.Name;
-
-            }
-        }
-    }
-
-
 }
