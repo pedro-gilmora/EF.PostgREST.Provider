@@ -49,12 +49,9 @@ public class PostgRestShapedQueryCompilingExpressionVisitor(ShapedQueryCompiling
             queryExpression.Projector = Expression.Lambda(queryExpression.Projector.Body, QueryCompilationContext.QueryContextParameter, queryExpression.Projector.Parameters[0]);
         }
 
-
         var enumerableType = typeof(PostgRestQueryingEnumerable<,>).MakeGenericType(queryExpression.EntityType.ClrType, queryExpression.Type);
-
         var constructor = enumerableType.GetConstructors()[0];
-
-        var colsTreeCopy = new ColumnsTree() { ClrType = queryExpression.EntityType.ClrType, OwningEntity = queryExpression.EntityType };
+        var colsTreeCopy = new ColumnsTree() { ClrType = queryExpression.EntityType.ClrType, TargetEntity = queryExpression.EntityType };
 
         foreach (var r in queryExpression.SelectColumns.OrderBy(e => e.IsRelation)) colsTreeCopy.Add(r);
 

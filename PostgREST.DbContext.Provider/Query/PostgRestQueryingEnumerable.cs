@@ -38,17 +38,6 @@ public sealed class PostgRestQueryingEnumerable<TIn, TOut>(
     string? _limitParameterName,
     Func<QueryContext, TIn, TOut> _selector) : IEnumerable<TOut>, IAsyncEnumerable<TOut>, IQueryingEnumerable
 {
-    //private readonly PostgRestQueryContext _queryContext = queryContext;
-    //private readonly string _tableName = tableName;
-    //private readonly IReadOnlyList<PostgRestFilter> _filters = filters;
-    //private readonly IReadOnlyList<PostgRestOrFilter> _orFilters = orFilters;
-    //private readonly ColumnsTree _selectColumns = selectColumns;
-    //private readonly IReadOnlyList<PostgRestOrderByClause> _orderByClauses = orderByClauses;
-    //private readonly int? _offset = offset;
-    //private readonly string? _offsetParameterName = offsetParameterName;
-    //private readonly int? _limit = limit;
-    //private readonly string? _limitParameterName = limitParameterName;
-
     /// <inheritdoc />
     public IEnumerator<TOut> GetEnumerator() => new Enumerator(_queryContext, _selector, BuildUrl, GetJsonOptions());
 
@@ -97,7 +86,6 @@ public sealed class PostgRestQueryingEnumerable<TIn, TOut>(
 
             if (!hasColumns)
             {
-                hasColumns = true;
                 item = new JsonFullEntityTypeInfoResolver(col);
             }
         }
@@ -333,7 +321,7 @@ public sealed class PostgRestQueryingEnumerable<TIn, TOut>(
 
             foreach (var targetMember in column.ClrType.GetMembers())
             {
-                if (targetMember is not { MemberType: MemberTypes.Field or MemberTypes.Property } || column.OwningEntity.FindMember(targetMember.Name)?.ColumnName is not { } columnsName) continue;
+                if (targetMember is not { MemberType: MemberTypes.Field or MemberTypes.Property } || column.TargetEntity.FindMember(targetMember.Name)?.ColumnName is not { } columnsName) continue;
 
                 var (memberType, getValue, setValue) = targetMember switch
                 {

@@ -106,7 +106,7 @@ public class ColumnsTree(string? identifier = null, bool isRelation = false) : H
     public Action<object, object?>? SetValue { get; internal set; }
     
 #pragma warning disable CS8618 
-    public IEntityType OwningEntity { get; internal set; }
+    public IEntityType TargetEntity { get; internal set; }
 
     public Type ClrType { get; internal set; }
     public Type? CollectionType { get; internal set; }

@@ -315,7 +315,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
                         SetValue = setValue,
                         ClrType = entityType.ClrType,
                         CollectionType = clrType,
-                        OwningEntity = queryExpression.EntityType,
+                        TargetEntity = entityType,
                         IsCollection = isCollection
                     });
                 }
@@ -326,28 +326,16 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             {
                 queryExpression.SelectColumns.Add(item);
             }
-            // Shaper is unchanged — entity is still returned as-is.
-            //newShaperExpression = source.ShaperExpression;
         }
         else
         {
             var parameter = selector.Parameters[0];
             queryExpression.Projector = (LambdaExpression)new SelectMappingsCollector(parameter, source, stackState.CurrentTargetEntitytType, stackState.Columns, 0).Visit(selector);
             queryExpression._type = selector.ReturnType;
-            //var newSelector = Expression.Lambda(newBody, selector.Parameters[0]);
-            //var expr = Expression.Convert(queryExpression.EntityParameter, typeof(IEnumerable<>).MakeGenericType(queryExpression.EntityType.ClrType));
-            //var newShapedQuery = Expression.Call(null, _select.MakeGenericMethod(selector.Parameters[0].Type, newSelector.ReturnType), expr, newSelector);
 
             queryExpression.SelectColumns.Clear();
             
             foreach (var item in stackState.Columns) queryExpression.SelectColumns.Add(item);
-            
-            //return new ShapedQueryExpression(
-            //    queryExpression,
-            //    new StructuralTypeShaperExpression(
-            //        queryExpression.EntityType,
-            //        new ProjectionBindingExpression(newShapedQuery, new ProjectionMember(), typeof(ValueBuffer)),
-            //        nullable: false));
         }
 
         stackState = oldStackState;
@@ -399,52 +387,14 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
                         GetValue = getValue,
                         SetValue = setValue,
                         ClrType = clrType,
-                        OwningEntity = entityType,
+                        TargetEntity = entityType,
                         IsCollection = isCollection
                     });
-
-                    //var targetType = targetMember is PropertyInfo propertyInfo ? propertyInfo.PropertyType : (targetMember as FieldInfo)!.FieldType;
-
-                    //var isSourceNullable = clrType.IsGenericType && clrType.GetGenericTypeDefinition() == typeof(Nullable<>);
-
-                    //var underlyingType = isSourceNullable
-                    //    ? Nullable.GetUnderlyingType(clrType)!
-                    //    : clrType;
-
-                    //var jsonProp = Expression.Call(ParamSource, _getPropertyMI, Expression.Constant(prop.ColumnName));
-
-                    //var methodName = underlyingType.Name;
-
-                    //if (underlyingType == typeof(byte[]))
-                    //    methodName = nameof(JsonElement.GetBytesFromBase64);
-
-                    //methodName = "Get" + methodName;
-
-                    //if (typeof(JsonElement).GetMethod(methodName) is not { } jsonMethod) return Expression.Default(underlyingType);
-
-                    //var expr = Expression.Call(jsonProp, jsonMethod);
-
-                    //if (isSourceNullable)
-                    //{
-                    //    return Expression.Condition(
-                    //        Expression.Equal(Expression.MakeMemberAccess(jsonProp, _valueKindProp), Expression.Constant(JsonValueKind.Null)),
-                    //        Expression.Default(targetType),
-                    //        targetType != underlyingType ? Expression.Convert(expr, targetType) : expr);
-                    //}
-
-                    //return expr;
                 }
             }
 
             return node;
         }
-
-        //protected override Expression VisitBinary(BinaryExpression node)
-        //{
-        //    if (node.NodeType == ExpressionType.Coalesce)
-        //        return Visit(node.Left);
-        //    return base.VisitBinary(node);
-        //}
 
         protected override Expression VisitMethodCall(MethodCallExpression node)
         {
@@ -467,7 +417,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
                     SetValue = setValue,
                     CollectionType = clrType,
                     ClrType = type.ClrType,
-                    OwningEntity = prop.DeclaringEntityType,
+                    TargetEntity = prop.DeclaringEntityType,
                     IsCollection = prop.IsCollection
                 };
 
@@ -479,8 +429,6 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
                 
                 var newBody = innerSelectCollector.Visit(body);
 
-                // ✅ FIX: Replace [EntityQueryRootExpression].Where(FK) with p.Compras (navigation property)
-                //         so the Projector is executable at runtime against the deserialized JSON entity.
                 var navAccess = Expression.MakeMemberAccess(parameter, propMemberInfo);
                 var newLambda = Expression.Lambda(newBody, _param);
                 return Expression.Call(null, method, navAccess, newLambda);
