@@ -225,11 +225,10 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
     record StackState(
         ColumnsTree Columns,
-        ShapedQueryExpression Source,
         ParameterExpression Parameter,
         IEntityType CurrentTargetEntitytType);
 
-    static MethodInfo
+    readonly static MethodInfo
         _select = typeof(Enumerable).GetMethods().FirstOrDefault(m => m.Name == "Select" && m.GetParameters().Length == 2)!;
 
     StackState? stackState;
@@ -269,7 +268,6 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
         var queryExpression = (PostgRestQueryExpression)source.QueryExpression;
         stackState = new([],
-                         source,
                          selector.Parameters[0],
                          queryExpression.EntityType);
 
@@ -292,40 +290,13 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         //Expression newShaperExpression;
         Expression bodyToVisit = selector.Body;
 
-        if (bodyToVisit is IncludeExpression)
+        if (bodyToVisit is IncludeExpression include)
         {
             // ── Include / ThenInclude path ───────────────────────────────────
             // Walk the (potentially nested ThenInclude) chain.
-            while (bodyToVisit is IncludeExpression include)
-            {
-                if (include.Navigation is { TargetEntityType: { TableName: string navName } entityType, IsCollection: var isCollection, Name: var memberName } nav)
-                {
-                    var targetMember = nav.GetMemberInfo(true, true);
 
-                    var (clrType, getValue, setValue) = targetMember switch
-                    {
-                        PropertyInfo { CanWrite: true } p => (p.PropertyType, p.GetValue, p.CanWrite ? p.SetValue : null),
-                        FieldInfo f when !(f.IsStatic || f.IsLiteral || f.IsInitOnly) => (f.FieldType, (Func<object, object?>?)f.GetValue, (Action<object, object?>?)f.SetValue),
-                        _ => throw new MissingMemberException($"Member for {nav} not found")
-                    };
+            TryRegisterInclude(include, stackState.Columns);
 
-                    stackState.Columns.Add(new ColumnsTree(navName, isRelation: true)
-                    {
-                        GetValue = getValue,
-                        SetValue = setValue,
-                        ClrType = entityType.ClrType,
-                        CollectionType = clrType,
-                        TargetEntity = entityType,
-                        IsCollection = isCollection
-                    });
-                }
-                bodyToVisit = include.EntityExpression;
-            }
-
-            foreach (var item in stackState.Columns)
-            {
-                queryExpression.SelectColumns.Add(item);
-            }
         }
         else
         {
@@ -334,13 +305,75 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             queryExpression._type = selector.ReturnType;
 
             queryExpression.SelectColumns.Clear();
-            
-            foreach (var item in stackState.Columns) queryExpression.SelectColumns.Add(item);
+
         }
+
+        foreach (var item in stackState.Columns) queryExpression.SelectColumns.Add(item);
 
         stackState = oldStackState;
 
         return source/*.UpdateShaperExpression(newShaperExpression)*/;
+
+        static void CheckInnerInclude(Expression navExpression, ColumnsTree parentColumn)
+        {
+            if (navExpression is MaterializeCollectionNavigationExpression {
+                    Subquery: MethodCallExpression {
+                        Arguments: [_, UnaryExpression {
+                            Operand: LambdaExpression {
+                                Body: IncludeExpression include
+                            }
+                        }]
+                    }
+                })
+            {
+                TryRegisterInclude(include, parentColumn);
+            }
+        }
+
+        static void TryRegisterInclude(IncludeExpression include, ColumnsTree parentColumn)
+        {
+            if (include is
+                {
+                    EntityExpression: var expression,
+                    Navigation: { TargetEntityType: { TableName: string navName } entityType, IsCollection: var isCollection, Name: var memberName } outerNav,
+                    NavigationExpression: var navExpression
+                })
+            {
+                if (expression is IncludeExpression prevInclude)
+                    TryRegisterInclude(prevInclude, parentColumn);
+
+                var targetMember = outerNav.GetMemberInfo(true, true);
+
+                var (clrType, getValue, setValue) = targetMember switch
+                {
+                    PropertyInfo { CanWrite: true } p =>
+                        (p.PropertyType,
+                         p.GetValue,
+                         p.CanWrite ? p.SetValue : null),
+
+                    FieldInfo f when !(f.IsStatic || f.IsLiteral || f.IsInitOnly) =>
+                        (f.FieldType,
+                         (Func<object, object?>?)f.GetValue,
+                         (Action<object, object?>?)f.SetValue),
+
+                    _ => throw new MissingMemberException($"Member for {outerNav} not found")
+                };
+
+                ColumnsTree col = new(navName, isRelation: true)
+                {
+                    GetValue = getValue,
+                    SetValue = setValue,
+                    ClrType = entityType.ClrType,
+                    CollectionType = clrType,
+                    TargetEntity = entityType,
+                    IsCollection = isCollection
+                };
+
+                parentColumn.Add(col);
+
+                CheckInnerInclude(navExpression, col);
+            }
+        }
     }
 
     class SelectMappingsCollector(ParameterExpression parameter, ShapedQueryExpression expression, IEntityType entityType, ColumnsTree selectColumns, int deepCount) : ExpressionVisitor
@@ -426,7 +459,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
                 var method = _select.MakeGenericMethod(type.ClrType, node.Method.GetGenericArguments()[1]);
 
                 SelectMappingsCollector innerSelectCollector = new(_param, expression, type, column, deepCount + 1);
-                
+
                 var newBody = innerSelectCollector.Visit(body);
 
                 var navAccess = Expression.MakeMemberAccess(parameter, propMemberInfo);

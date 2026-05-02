@@ -5,6 +5,8 @@
 
 #nullable enable
 
+using PostgREST.DbContext.Provider.Tests.Models;
+
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -56,6 +58,9 @@ public class Compra
     [Column("idUnidadMedida")]
     public int IdUnidadMedida { get; set; }
 
-    [ForeignKey("IdProducto")]
+    [ForeignKey(nameof(IdProducto))]
     public Producto Producto { get; set; }
+
+    [ForeignKey(nameof(IdUnidadMedida))]
+    public UnidadMedida UnidadMedida { get; internal set; }
 }

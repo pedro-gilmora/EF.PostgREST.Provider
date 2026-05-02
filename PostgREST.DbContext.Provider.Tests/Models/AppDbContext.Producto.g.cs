@@ -5,6 +5,8 @@
 
 #nullable enable
 
+using PostgREST.DbContext.Provider.Tests.Models;
+
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
