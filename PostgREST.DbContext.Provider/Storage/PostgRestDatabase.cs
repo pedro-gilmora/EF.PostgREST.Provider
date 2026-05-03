@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore.Update;
 using PosgREST.DbContext.Provider.Core.Update;
@@ -27,7 +29,8 @@ public sealed class PostgRestDatabase : Database
 
         _updatePipeline = new PostgRestUpdatePipeline(
             postgRestDependencies.HttpClient,
-            postgRestDependencies.Options);
+            postgRestDependencies.Options,
+            postgRestDependencies.CommandLogger);
     }
 
     /// <inheritdoc />

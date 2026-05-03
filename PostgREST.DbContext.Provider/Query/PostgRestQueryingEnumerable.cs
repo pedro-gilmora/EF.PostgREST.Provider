@@ -1,10 +1,15 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 
+using PosgREST.DbContext.Provider.Core.Diagnostics;
+
 using System.Collections;
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Reflection;
@@ -205,8 +210,23 @@ public sealed class PostgRestQueryingEnumerable<TIn, TOut>(
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             ApplyHeaders(request, queryContext);
 
+#if DEBUG
+            queryContext.CommandLogger.LogRequestExecuting(HttpMethod.Get.Method, url, body: null);
+
+            var sw = Stopwatch.GetTimestamp();
+#endif
+
             using var response = queryContext.HttpClient
                 .Send(request, HttpCompletionOption.ResponseContentRead);
+
+#if DEBUG
+            queryContext.CommandLogger.LogRequestExecuted(
+                HttpMethod.Get.Method,
+                url,
+                (int)response.StatusCode,
+                Stopwatch.GetElapsedTime(sw));
+#endif
+
 
             PostgRestException.ThrowIfError(response);
 
@@ -259,9 +279,22 @@ public sealed class PostgRestQueryingEnumerable<TIn, TOut>(
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             ApplyHeaders(request, queryContext);
 
+#if DEBUG
+            queryContext.CommandLogger.LogRequestExecuting(HttpMethod.Get.Method, url, body: null);
+
+            var sw = Stopwatch.GetTimestamp();
+#endif
             var response = await queryContext.HttpClient
                 .SendAsync(request, HttpCompletionOption.ResponseContentRead, _cancellationToken)
                 .ConfigureAwait(false);
+
+#if DEBUG
+            queryContext.CommandLogger.LogRequestExecuted(
+                HttpMethod.Get.Method,
+                url,
+                (int)response.StatusCode,
+                Stopwatch.GetElapsedTime(sw));
+#endif
 
             await PostgRestException.ThrowIfErrorAsync(response, _cancellationToken)
                 .ConfigureAwait(false);

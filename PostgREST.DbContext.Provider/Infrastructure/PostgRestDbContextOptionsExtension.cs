@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -95,7 +96,8 @@ public sealed class PostgRestDbContextOptionsExtension : IDbContextOptionsExtens
                 .AddSingleton(sp =>
                     new PostgRestDatabaseDependencies(
                         sp.GetRequiredService<HttpClient>(),
-                        sp.GetRequiredService<PostgRestDbContextOptionsExtension>()));
+                        sp.GetRequiredService<PostgRestDbContextOptionsExtension>(),
+                        sp.GetRequiredService<IDiagnosticsLogger<DbLoggerCategory.Database.Command>>()));
     }
 
     /// <inheritdoc />

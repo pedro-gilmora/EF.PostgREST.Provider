@@ -1,10 +1,14 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
+using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.EntityFrameworkCore.Update;
 
+using PosgREST.DbContext.Provider.Core.Diagnostics;
 using PosgREST.DbContext.Provider.Core.Infrastructure;
 
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -31,10 +35,12 @@ namespace PosgREST.DbContext.Provider.Core.Update;
 /// </remarks>
 public sealed class PostgRestUpdatePipeline(
     HttpClient httpClient,
-    PostgRestDbContextOptionsExtension options)
+    PostgRestDbContextOptionsExtension options,
+    IDiagnosticsLogger<DbLoggerCategory.Database.Command> logger)
 {
     private readonly HttpClient _httpClient = httpClient;
     private readonly PostgRestDbContextOptionsExtension _options = options;
+    private readonly IDiagnosticsLogger<DbLoggerCategory.Database.Command> _logger = logger;
 
     /// <summary>
     /// Executes all pending modifications synchronously.
@@ -47,8 +53,30 @@ public sealed class PostgRestUpdatePipeline(
 
         foreach (var entry in ordered)
         {
-            using var request = BuildRequest(entry);
+            using var request = BuildRequest(entry, out var url);
+            var body = entry.EntityState != EntityState.Deleted
+                ? request.Content?.ReadAsStringAsync().GetAwaiter().GetResult()
+                : null;
+
+            _logger.LogRequestExecuting(
+                request.Method.Method,
+                request.RequestUri?.ToString() ?? string.Empty,
+                body);
+
+#if DEBUG
+            var sw = Stopwatch.GetTimestamp();
+#endif
+
             using var response = _httpClient.Send(request, HttpCompletionOption.ResponseContentRead);
+
+            _logger.LogRequestExecuted(request.Method.Method, url, (int)response.StatusCode,
+#if DEBUG
+                Stopwatch.GetElapsedTime(sw)
+#else  
+                -1
+#endif
+);
+
             PostgRestException.ThrowIfError(response);
 
             PropagateServerValues(entry, response);
@@ -71,10 +99,25 @@ public sealed class PostgRestUpdatePipeline(
 
         foreach (var entry in ordered)
         {
-            using var request = BuildRequest(entry);
-            using var response = await _httpClient
-                .SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken)
-                .ConfigureAwait(false);
+            using var request = BuildRequest(entry, out var url);
+            var body = entry.EntityState != EntityState.Deleted && request.Content is not null
+                ? await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false)
+                : null;
+
+#if DEBUG
+            var sw = Stopwatch.GetTimestamp();
+#endif
+
+            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken);
+
+            _logger.LogRequestExecuted(request.Method.Method, url, (int)response.StatusCode,
+#if DEBUG
+                Stopwatch.GetElapsedTime(sw)
+#else  
+                -1
+#endif
+);
+
             await PostgRestException.ThrowIfErrorAsync(response, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -258,22 +301,22 @@ public sealed class PostgRestUpdatePipeline(
     //  Request building
     // ──────────────────────────────────────────────
 
-    private HttpRequestMessage BuildRequest(IUpdateEntry entry)
+    private HttpRequestMessage BuildRequest(IUpdateEntry entry, out string url)
     {
         return entry.EntityState switch
         {
-            EntityState.Added => BuildPostRequest(entry),
-            EntityState.Modified => BuildPatchRequest(entry),
-            EntityState.Deleted => BuildDeleteRequest(entry),
+            EntityState.Added => BuildPostRequest(entry, out url),
+            EntityState.Modified => BuildPatchRequest(entry, out url),
+            EntityState.Deleted => BuildDeleteRequest(entry, out url),
             _ => throw new InvalidOperationException(
                 $"Unexpected EntityState '{entry.EntityState}' for update pipeline.")
         };
     }
 
-    private HttpRequestMessage BuildPostRequest(IUpdateEntry entry)
+    private HttpRequestMessage BuildPostRequest(IUpdateEntry entry, out string url)
     {
         var tableName = entry.EntityType.TableName;
-        var url = $"{BaseUrl}/{tableName}";
+        url = $"{BaseUrl}/{tableName}";
         var body = SerializeAllProperties(entry);
 
         var request = new HttpRequestMessage(HttpMethod.Post, url)
@@ -286,11 +329,11 @@ public sealed class PostgRestUpdatePipeline(
         return request;
     }
 
-    private HttpRequestMessage BuildPatchRequest(IUpdateEntry entry)
+    private HttpRequestMessage BuildPatchRequest(IUpdateEntry entry, out string url)
     {
         var tableName = entry.EntityType.TableName;
         var pkFilter = BuildPrimaryKeyFilter(entry);
-        var url = $"{BaseUrl}/{tableName}?{pkFilter}";
+        url = $"{BaseUrl}/{tableName}?{pkFilter}";
         var body = SerializeModifiedProperties(entry);
 
         var request = new HttpRequestMessage(HttpMethod.Patch, url)
@@ -303,11 +346,11 @@ public sealed class PostgRestUpdatePipeline(
         return request;
     }
 
-    private HttpRequestMessage BuildDeleteRequest(IUpdateEntry entry)
+    private HttpRequestMessage BuildDeleteRequest(IUpdateEntry entry, out string url)
     {
         var tableName = entry.EntityType.TableName;
         var pkFilter = BuildPrimaryKeyFilter(entry);
-        var url = $"{BaseUrl}/{tableName}?{pkFilter}";
+        url = $"{BaseUrl}/{tableName}?{pkFilter}";
 
         var request = new HttpRequestMessage(HttpMethod.Delete, url);
         ApplyCommonHeaders(request, writeProfile: false);

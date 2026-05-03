@@ -1,9 +1,13 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+
 using PosgREST.DbContext.Provider.Core;
 using PosgREST.DbContext.Provider.Core.Extensions;
 
 using PostgREST.DbContext.Provider.Analyzers.Tests.Models;
 using PostgREST.DbContext.Provider.Tests.Models;
+
+using System.Diagnostics;
 
 namespace PosgREST.DbContext.Provider.Console;
 
@@ -11,12 +15,20 @@ namespace PosgREST.DbContext.Provider.Console;
 /// DbContext targeting the PostgREST instance at the configured base URL.
 /// </summary>
 [SchemaDesign("http://localhost:3000")]
-public class AppDbContext(string baseUrl) : Microsoft.EntityFrameworkCore.DbContext
+public class AppDbContext(string baseUrl, bool enableLogs = false) : Microsoft.EntityFrameworkCore.DbContext
 {
     //public DbSet<Producto> Productos { get; set; }
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
-        optionsBuilder.UsePostgRest(baseUrl);
+        optionsBuilder
+            .UsePostgRest(baseUrl);
+#if DEBUG
+        if (enableLogs)
+            optionsBuilder
+                .LogTo(s => Trace.WriteLine(s), LogLevel.Debug)   // prints all EF Core + PostgREST events
+                .EnableSensitiveDataLogging();                     // includes request bodies / filter values
+#endif
+
     }
 
     public DbSet<Producto> Producto { get; set; } = null!;
