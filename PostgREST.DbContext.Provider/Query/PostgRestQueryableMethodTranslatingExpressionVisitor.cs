@@ -67,7 +67,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
     {
         var queryExpression = (PostgRestQueryExpression)source.QueryExpression;
 
-        if (TryExtractFilters(predicate.Body, predicate.Parameters[0], queryExpression))
+        if (TryExtractFilters(predicate.Body, predicate.Parameters[0], queryExpression, queryExpression.EntityType))
             return source;
 
         AddTranslationErrorDetails("Could not translate predicate to PostgREST filter.");
@@ -271,32 +271,11 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
                          selector.Parameters[0],
                          queryExpression.EntityType);
 
-        // ── 1. Handle IncludeExpression ──────────────────────────────────────
-        //
-        // Each .Include(e => e.Nav) call arrives as a separate TranslateSelect
-        // invocation whose selector.Body is a single IncludeExpression:
-        //
-        //   IncludeExpression(Ventas)          ← selector.Body
-        //     └─ EntityExpression: p           ← the entity parameter
-        //
-        // Multiple .Include() calls therefore produce multiple TranslateSelect
-        // calls in sequence — they are NOT nested.  We must NOT clear
-        // SelectColumns here; we only add the new navigation node so that
-        // columns accumulated by earlier Include calls are preserved.
-        //
-        // ThenInclude IS nested: Include(Include(p, Nav1), Nav2).
-        // The while-loop handles that by walking inward until the bare entity
-        // parameter is reached.
-        //Expression newShaperExpression;
         Expression bodyToVisit = selector.Body;
 
         if (bodyToVisit is IncludeExpression include)
         {
-            // ── Include / ThenInclude path ───────────────────────────────────
-            // Walk the (potentially nested ThenInclude) chain.
-
-            TryRegisterInclude(include, stackState.Columns);
-
+            RegisterInclude(include, stackState.Columns);
         }
         else
         {
@@ -305,7 +284,6 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             queryExpression._type = selector.ReturnType;
 
             queryExpression.SelectColumns.Clear();
-
         }
 
         foreach (var item in stackState.Columns) queryExpression.SelectColumns.Add(item);
@@ -314,11 +292,11 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
         return source/*.UpdateShaperExpression(newShaperExpression)*/;
 
-        static void CheckInnerInclude(Expression navExpression, ColumnsTree parentColumn)
+        void CheckInnerInclude(Expression navExpression, ColumnsTree parentColumn, IEntityType entityType)
         {
-            if (navExpression is MaterializeCollectionNavigationExpression {
-                    Subquery: MethodCallExpression {
-                        Arguments: [_, UnaryExpression {
+            if (navExpression is MaterializeCollectionNavigationExpression { 
+                    Subquery: MethodCallExpression { 
+                        Arguments: [{ } target, UnaryExpression { 
                             Operand: LambdaExpression {
                                 Body: IncludeExpression include
                             }
@@ -326,11 +304,17 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
                     }
                 })
             {
-                TryRegisterInclude(include, parentColumn);
+                RegisterInclude(include, parentColumn);
+                if (target is MethodCallExpression {
+                        Arguments: [MethodCallExpression { Arguments: [MethodCallExpression{ Method.Name: "Where" and var methodName }, UnaryExpression { Operand: LambdaExpression selector }] args2 }, ..]
+                    })
+                {
+                    TryExtractFilters(selector.Body, selector.Parameters[0], queryExpression, entityType, parentColumn.Identifier);
+                }
             }
         }
 
-        static void TryRegisterInclude(IncludeExpression include, ColumnsTree parentColumn)
+        void RegisterInclude(IncludeExpression include, ColumnsTree parentColumn)
         {
             if (include is
                 {
@@ -340,7 +324,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
                 })
             {
                 if (expression is IncludeExpression prevInclude)
-                    TryRegisterInclude(prevInclude, parentColumn);
+                    RegisterInclude(prevInclude, parentColumn);
 
                 var targetMember = outerNav.GetMemberInfo(true, true);
 
@@ -371,7 +355,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
                 parentColumn.Add(col);
 
-                CheckInnerInclude(navExpression, col);
+                CheckInnerInclude(navExpression, col, entityType);
             }
         }
     }
@@ -793,20 +777,22 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
     private static bool TryExtractFilters(
         Expression expression,
         ParameterExpression entityParam,
-        PostgRestQueryExpression queryExpression)
+        PostgRestQueryExpression queryExpression,
+        IEntityType entityType,
+        string? parentExpression = null)
     {
         // Handle AND: a && b
         if (expression is BinaryExpression { NodeType: ExpressionType.AndAlso } andExpr)
         {
-            return TryExtractFilters(andExpr.Left, entityParam, queryExpression)
-                && TryExtractFilters(andExpr.Right, entityParam, queryExpression);
+            return TryExtractFilters(andExpr.Left, entityParam, queryExpression, entityType, parentExpression)
+                && TryExtractFilters(andExpr.Right, entityParam, queryExpression, entityType, parentExpression);
         }
 
         // Handle OR: a || b → ?or=(cond1,cond2)
         if (expression is BinaryExpression { NodeType: ExpressionType.OrElse } orExpr)
         {
             var branches = new List<PostgRestFilter>();
-            if (TryFlattenOrBranches(queryExpression.EntityType, orExpr, entityParam, branches))
+            if (TryFlattenOrBranches(entityType, orExpr, entityParam, branches, parentExpression))
             {
                 queryExpression.AddOrFilter(new PostgRestOrFilter { Branches = branches });
                 return true;
@@ -817,20 +803,20 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         // Handle NOT: !(expr)
         if (expression is UnaryExpression { NodeType: ExpressionType.Not } notExpr)
         {
-            return TryExtractNegatedFilter(notExpr.Operand, entityParam, queryExpression);
+            return TryExtractNegatedFilter(notExpr.Operand, entityParam, queryExpression, parentExpression);
         }
 
         // Handle comparison: e.Column op value (including null checks)
         if (expression is BinaryExpression binary)
         {
             // Null equality: e.Col == null → is.null / e.Col != null → not.is.null
-            if (TryExtractNullCheck(queryExpression.EntityType, binary, entityParam, out var nullFilter))
+            if (TryExtractNullCheck(entityType, binary, entityParam, parentExpression, out var nullFilter))
             {
                 queryExpression.AddFilter(nullFilter);
                 return true;
             }
 
-            if (TryExtractBinaryFilter(queryExpression.EntityType, binary, entityParam, out var filter))
+            if (TryExtractBinaryFilter(entityType, binary, entityParam, parentExpression, out var filter))
             {
                 queryExpression.AddFilter(filter);
                 return true;
@@ -839,7 +825,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
         // Handle method calls: Contains, StartsWith, EndsWith, List.Contains
         if (expression is MethodCallExpression methodCall
-            && TryExtractMethodCallFilter(queryExpression.EntityType, methodCall, entityParam, out var mcFilter))
+            && TryExtractMethodCallFilter(entityType, methodCall, entityParam, parentExpression, out var mcFilter))
         {
             queryExpression.AddFilter(mcFilter);
             return true;
@@ -847,9 +833,12 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
         // Handle bare boolean member: e.Done → ?done=is.true
         if (expression is MemberExpression member
-            && TryExtractPropertyName(member, entityParam, out var propName) && queryExpression.EntityType.GetProperty(propName)?.ColumnName is { } boolCol
+            && TryExtractPropertyName(member, entityParam, out var propName) && entityType.GetProperty(propName)?.ColumnName is { } boolCol
             && member.Type == typeof(bool))
         {
+            if (parentExpression != null)
+                boolCol = parentExpression + '.' + boolCol;
+
             queryExpression.AddFilter(new PostgRestFilter
             {
                 PropertyName = propName,
@@ -869,13 +858,17 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
     private static bool TryExtractNegatedFilter(
         Expression operand,
         ParameterExpression entityParam,
-        PostgRestQueryExpression queryExpression)
+        PostgRestQueryExpression queryExpression,
+        string? parentExpression)
     {
         // !e.Done → ?done=is.false
         if (operand is MemberExpression member
             && TryExtractPropertyName(member, entityParam, out var propName) && queryExpression.EntityType.GetProperty(propName)?.ColumnName is { } column
             && member.Type == typeof(bool))
         {
+            if (parentExpression != null)
+                column = parentExpression + '.' + column;
+
             queryExpression.AddFilter(new PostgRestFilter
             {
                 PropertyName = propName,
@@ -888,7 +881,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
         // !(e.Col == value) → not.eq.value
         if (operand is BinaryExpression binary
-            && TryExtractBinaryFilter(queryExpression.EntityType, binary, entityParam, out var filter))
+            && TryExtractBinaryFilter(queryExpression.EntityType, binary, entityParam, parentExpression, out var filter))
         {
             queryExpression.AddFilter(new PostgRestFilter
             {
@@ -905,7 +898,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
         // !(e.Name.Contains("x")) → not.like.*x*
         if (operand is MethodCallExpression methodCall
-            && TryExtractMethodCallFilter(queryExpression.EntityType, methodCall, entityParam, out var mcFilter))
+            && TryExtractMethodCallFilter(queryExpression.EntityType, methodCall, entityParam, parentExpression, out var mcFilter))
         {
             queryExpression.AddFilter(new PostgRestFilter
             {
@@ -930,23 +923,24 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         IEntityType entityType,
         Expression expression,
         ParameterExpression entityParam,
-        List<PostgRestFilter> branches)
+        List<PostgRestFilter> branches,
+        string? parentExpression)
     {
         if (expression is BinaryExpression { NodeType: ExpressionType.OrElse } orExpr)
         {
-            return TryFlattenOrBranches(entityType, orExpr.Left, entityParam, branches)
-                && TryFlattenOrBranches(entityType, orExpr.Right, entityParam, branches);
+            return TryFlattenOrBranches(entityType, orExpr.Left, entityParam, branches, parentExpression)
+                && TryFlattenOrBranches(entityType, orExpr.Right, entityParam, branches, parentExpression);
         }
 
         if (expression is BinaryExpression binary
-            && TryExtractBinaryFilter(entityType, binary, entityParam, out var filter))
+            && TryExtractBinaryFilter(entityType, binary, entityParam, parentExpression, out var filter))
         {
             branches.Add(filter);
             return true;
         }
 
         if (expression is MethodCallExpression methodCall
-            && TryExtractMethodCallFilter(entityType, methodCall, entityParam, out var mcFilter))
+            && TryExtractMethodCallFilter(entityType, methodCall, entityParam, parentExpression, out var mcFilter))
         {
             branches.Add(mcFilter);
             return true;
@@ -963,6 +957,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         IEntityType entityType,
         BinaryExpression binary,
         ParameterExpression entityParam,
+        string? parentExpression,
         out PostgRestFilter filter)
     {
         filter = null!;
@@ -976,6 +971,9 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         if (TryExtractPropertyName(binary.Left, entityParam, out var propName) && entityType.GetProperty(propName)?.ColumnName is { } column
             && IsNullConstant(binary.Right))
         {
+            if (parentExpression != null)
+                column = parentExpression + '.' + column;
+
             filter = new PostgRestFilter
             {
                 PropertyName = propName,
@@ -991,6 +989,9 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         if (TryExtractPropertyName(binary.Right, entityParam, out propName) && (column = entityType.GetProperty(propName)?.ColumnName) is { }
             && IsNullConstant(binary.Left))
         {
+            if (parentExpression != null)
+                column = parentExpression + '.' + column;
+
             filter = new PostgRestFilter
             {
                 PropertyName = propName,
@@ -1016,6 +1017,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         IEntityType entityType,
         BinaryExpression binary,
         ParameterExpression entityParam,
+        string? parentExpression,
         out PostgRestFilter filter)
     {
         filter = null!;
@@ -1028,6 +1030,9 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         if (TryExtractPropertyName(binary.Left, entityParam, out var propName) && entityType.GetProperty(propName)?.ColumnName is { } column
             && TryExtractValue(binary.Right, out var value, out var paramName, out var isParam))
         {
+            if (parentExpression != null)
+                column = parentExpression + '.' + column;
+
             filter = new PostgRestFilter
             {
                 PropertyName = propName,
@@ -1044,6 +1049,9 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         if (TryExtractPropertyName(binary.Right, entityParam, out propName) && (column = entityType.GetProperty(propName)?.ColumnName) is { }
             && TryExtractValue(binary.Left, out value, out paramName, out isParam))
         {
+            if (parentExpression != null)
+                column = parentExpression + '.' + column;
+
             filter = new PostgRestFilter
             {
                 PropertyName = propName,
@@ -1063,6 +1071,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
         IEntityType entityType,
         MethodCallExpression call,
         ParameterExpression entityParam,
+        string? parentExpression,
         out PostgRestFilter filter)
     {
         filter = null!;
@@ -1076,6 +1085,9 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
                 && call.Arguments.Count == 1
                 && TryExtractValue(call.Arguments[0], out var value, out var paramName, out var isParam))
             {
+                if (parentExpression != null)
+                    column = parentExpression + '.' + column;
+
                 var likeValue = isParam ? value : $"*{value}*";
                 filter = new PostgRestFilter
                 {
@@ -1096,6 +1108,9 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
                 && call.Arguments.Count == 1
                 && TryExtractValue(call.Arguments[0], out value, out paramName, out isParam))
             {
+                if (parentExpression != null)
+                    column = parentExpression + '.' + column;
+
                 var likeValue = isParam ? value : $"{value}*";
                 filter = new PostgRestFilter
                 {
@@ -1116,6 +1131,9 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
                 && call.Arguments.Count == 1
                 && TryExtractValue(call.Arguments[0], out value, out paramName, out isParam))
             {
+                if (parentExpression != null)
+                    column = parentExpression + '.' + column;
+
                 var likeValue = isParam ? value : $"*{value}";
                 filter = new PostgRestFilter
                 {
@@ -1137,6 +1155,9 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             && TryExtractPropertyName(call.Arguments[1], entityParam, out var propName) && entityType.GetProperty(propName)?.ColumnName is { } inColumn
             && TryExtractCollectionValue(call.Arguments[0], out var collectionValue, out var collectionParamName, out var collectionIsParam))
         {
+            if (parentExpression != null)
+                inColumn = parentExpression + '.' + inColumn;
+
             filter = new PostgRestFilter
             {
                 PropertyName = propName,
@@ -1157,6 +1178,9 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             && TryExtractPropertyName(call.Arguments[0], entityParam, out propName) && (inColumn = entityType.GetProperty(propName)?.ColumnName) is { }
             && TryExtractCollectionValue(call.Object, out collectionValue, out collectionParamName, out collectionIsParam))
         {
+            if (parentExpression != null)
+                inColumn = parentExpression + '.' + inColumn;
+
             filter = new PostgRestFilter
             {
                 PropertyName = propName,

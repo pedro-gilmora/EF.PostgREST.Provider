@@ -186,9 +186,13 @@ public class Tests
     [Fact]
     public async Task LoadIncludes()
     {
-          using var ctx = new AppDbContext(BaseUrl);
+        using var ctx = new AppDbContext(BaseUrl, true);
 
-        var productos = await ctx.Producto.Include(p => p.Compras).ThenInclude(p => p.UnidadMedida).Include(p => p.Ventas).ToListAsync();
+        var productos = await ctx.Producto
+            .Include(p => p.Compras.Where(e => e.Tasa != 0))
+                .ThenInclude(p => p.UnidadMedida)
+            .Include(p => p.Ventas)
+            .ToListAsync();
     }
 }
 
