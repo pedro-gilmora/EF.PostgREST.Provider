@@ -21,7 +21,7 @@ public class Tests
     //  SELECT
     // ──────────────────────────────────────────────────────────────────────────
 
-    /// <summary>TEST 1 — SELECT all rows from <c>categorias</c>.</summary>
+    /// <summary>TEST 1 — SELECT all rows from <c>Categoria</c>.</summary>
     [Fact]
     public async Task SelectAll_ReturnsAllCategorias()
     {
@@ -189,10 +189,12 @@ public class Tests
         using var ctx = new AppDbContext(BaseUrl, true);
 
         var productos = await ctx.Producto
-            .Include(p => p.Compras.Where(e => e.Tasa != 0))
+            .Include(p => p.Compras.Where(e => e.Tasa == 0))
                 .ThenInclude(p => p.UnidadMedida)
             .Include(p => p.Ventas)
             .ToListAsync();
+
+        ;
     }
 }
 

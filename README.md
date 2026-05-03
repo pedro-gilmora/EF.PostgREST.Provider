@@ -12,12 +12,17 @@ An **Entity Framework Core custom database provider** that targets a [PostgREST]
 
 - **Zero-config LINQ → PostgREST translation** — `WHERE`, `SELECT`, `ORDER BY`, `SKIP/TAKE` all map to PostgREST query-string parameters.
 - **Full CRUD via `SaveChanges`** — `Added` → `POST`, `Modified` → `PATCH`, `Deleted` → `DELETE`.
-- **Projection support** — anonymous types, scalars, `ValueTuple`, record DTOs, class member-init, nested shapes.
+- **Cascade insert** — insert a parent entity together with its related children in a single `SaveChangesAsync()` call.
+- **Bulk operations** — `ExecuteUpdateAsync` and `ExecuteDeleteAsync` translate to `PATCH`/`DELETE` with query-string filters (no entity tracking required).
+- **Eager loading** — `Include` / `ThenInclude`, including filtered includes (`.Include(p => p.Children.Where(...))`).
+- **Projection support** — anonymous types, scalars, `ValueTuple`, record DTOs, class member-init, nested shapes, and nested related-collection projections.
+- **Result materialization helpers** — `ToListAsync`, `ToDictionaryAsync`, `FirstOrDefaultAsync`, synchronous `.ToList()`.
 - **Filter operators** — `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `is null`, OR predicates, NOT predicates, `IN` lists.
 - **JWT authentication** — pass a bearer token through provider options.
 - **Non-default schema support** — `Accept-Profile` / `Content-Profile` headers.
 - **`IHttpClientFactory` integration** — no raw `HttpClient` instances.
 - **`System.Text.Json` source generators** — AOT-safe serialization.
+- **Roslyn Analyzer / Entity Code Generator** — generates strongly-typed entity classes from a live PostgREST schema, emitting `[Key]` for single-column PKs and `[PrimaryKey(...)]` for composite PKs.
 - Targets **.NET 10** and **EF Core 10**.
 
 ---
@@ -86,10 +91,28 @@ var page = await db.Categorias
     .Skip(0).Take(10)
     .ToListAsync();
 
-// Projection
+// Projection — anonymous type
 var names = await db.Categorias
     .Select(c => new { c.Id, c.Nombre })
     .ToListAsync();
+
+// Projection — nested related-collection
+var products = await db.Producto
+    .Select(p => new ProductDto
+    {
+        Id        = p.Id,
+        Name      = p.Nombre,
+        Purchases = p.Compras
+            .Select(c => new PurchaseDto { Id = c.Id, Quantity = c.Cantidad })
+            .ToList()
+    })
+    .ToListAsync();
+
+// Materialize as dictionary
+var dict = await db.Categorias.ToDictionaryAsync(c => c.Id, c => c.Nombre);
+
+// Synchronous query
+var sync = db.Categorias.OrderBy(c => c.Id).Take(3).ToList();
 ```
 
 ### 4. Mutate data
@@ -101,6 +124,12 @@ db.Categorias.Add(cat);
 await db.SaveChangesAsync();
 Console.WriteLine(cat.Id); // server-assigned PK
 
+// CASCADE INSERT — parent + children in one call
+var prod = new Producto { Nombre = "Widget" };
+prod.Compras.Add(new Compra { Cantidad = 5, Precio = 15, Moneda = "USD" });
+await db.Producto.AddAsync(prod);
+await db.SaveChangesAsync(); // POSTs parent, then each child
+
 // UPDATE
 cat.Nombre = "Updated";
 await db.SaveChangesAsync();
@@ -108,6 +137,33 @@ await db.SaveChangesAsync();
 // DELETE
 db.Categorias.Remove(cat);
 await db.SaveChangesAsync();
+```
+
+### 5. Bulk / batch operations
+
+No entity tracking needed — these translate directly to PostgREST `PATCH`/`DELETE` with a query-string filter.
+
+```csharp
+// Bulk update — PATCH /categorias?id=in.(2,3)  { "nombre": "Renamed" }
+var updated = await db.Categorias
+    .Where(c => ids.Contains(c.Id))
+    .ExecuteUpdateAsync(s => s.SetProperty(c => c.Nombre, "Renamed"));
+
+// Bulk delete — DELETE /categorias?id=in.(2,3)
+var deleted = await db.Categorias
+    .Where(c => ids.Contains(c.Id))
+    .ExecuteDeleteAsync();
+```
+
+### 6. Eager loading
+
+```csharp
+// Include related collections (with optional filter)
+var products = await db.Producto
+    .Include(p => p.Compras.Where(c => c.Tasa == 0))
+        .ThenInclude(c => c.UnidadMedida)
+    .Include(p => p.Ventas)
+    .ToListAsync();
 ```
 
 ---
@@ -128,10 +184,15 @@ await db.SaveChangesAsync();
 | `.Where(e => e.Id == 2 \|\| e.Id == 3)`   | `?or=(id=eq.2,id=eq.3)`             |
 | `.Where(e => e.Name == null)`             | `?name=is.null`                     |
 | `.Where(e => e.Name != null)`             | `?name=not.is.null`                 |
+| `.Where(e => ids.Contains(e.Id))`         | `?id=in.(1,2,3)`                    |
 | `.OrderBy(e => e.Name)`                   | `?order=name.asc`                   |
 | `.OrderByDescending(e => e.Name)`         | `?order=name.desc`                  |
 | `.Skip(10).Take(5)`                       | `?offset=10&limit=5`                |
 | `.Select(e => new { e.Id, e.Name })`      | `?select=id,name`                   |
+| `.ExecuteUpdateAsync(s => s.SetProperty(...))` | `PATCH /{table}?{filter}`      |
+| `.ExecuteDeleteAsync()`                   | `DELETE /{table}?{filter}`          |
+| `.Include(e => e.Children)`               | `?select=*,children(*)` (embedded)  |
+| `.Include(e => e.Children.Where(...))`    | filtered embedded resource          |
 
 ### EntityState → HTTP Verb
 
@@ -141,25 +202,37 @@ await db.SaveChangesAsync();
 | `Modified`            | `PATCH`   | `PATCH /{table}?{pk}=eq.{value}`           |
 | `Deleted`             | `DELETE`  | `DELETE /{table}?{pk}=eq.{value}`          |
 | `Unchanged` (query)   | `GET`     | `GET /{table}?select={cols}&{filters}`     |
+| Bulk (`ExecuteUpdateAsync`) | `PATCH` | `PATCH /{table}?{filter}`             |
+| Bulk (`ExecuteDeleteAsync`) | `DELETE` | `DELETE /{table}?{filter}`           |
 
 ---
 
-## Tests
+## Roslyn Analyzer & Entity Code Generator
 
-Integration tests run against a live PostgREST instance at `http://localhost:3000`. Start PostgREST pointing to your database before running:
+The `PostgREST.DbContext.Provider.Analyzers` package ships a Roslyn analyzer and a source-level entity code generator that can scaffold strongly-typed C# entity classes directly from a live PostgREST schema endpoint.
 
-```shell
-dotnet test PosgREST.DbContext.Provider/PosgREST.DbContext.Provider.Console.csproj \
-    --logger "console;verbosity=normal"
+### Generated code rules
+
+| Scenario | Generated attribute |
+|---|---|
+| Single-column primary key | `[Key]` on the property |
+| Composite primary key | `[PrimaryKey(nameof(Col1), nameof(Col2))]` on the class + `using Microsoft.EntityFrameworkCore;` |
+| Timestamp / date columns | Mapped to `DateTimeOffset` / `DateOnly` |
+| Nullable columns | Emitted as nullable reference / value types |
+
+### Usage
+
+Reference the analyzer project as an analyzer in your `.csproj`:
+
+```xml
+<ItemGroup>
+  <ProjectReference Include="..\PostgREST.DbContext.Provider.Analyzers\..."
+                    ReferenceOutputAssembly="true"
+                    OutputItemType="analyzer" />
+</ItemGroup>
 ```
 
-### Test coverage overview
-
-| Suite | What is tested |
-|---|---|
-| `CrudTests` | SELECT all, SELECT with WHERE, ORDER BY + Take, full INSERT → UPDATE → DELETE lifecycle |
-| `FilterTests` | `FirstOrDefault`, `StartsWith`, `EndsWith`, OR predicates, NOT predicates, NULL / NOT NULL checks, `IN` lists |
-| `SelectProjectionTests` | Anonymous types, scalars, `ValueTuple`, record DTOs, class member-init, nested anonymous shapes, combined WHERE + SELECT |
+The generator produces one `.cs` file per table, ready to be used as EF Core entities.
 
 ---
 
