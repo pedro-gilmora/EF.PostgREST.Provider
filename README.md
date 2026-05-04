@@ -15,6 +15,7 @@ An **Entity Framework Core custom database provider** that targets a [PostgREST]
 - **Cascade insert** — insert a parent entity together with its related children in a single `SaveChangesAsync()` call.
 - **Bulk operations** — `ExecuteUpdateAsync` and `ExecuteDeleteAsync` translate to `PATCH`/`DELETE` with query-string filters (no entity tracking required).
 - **Eager loading** — `Include` / `ThenInclude`, including filtered includes (`.Include(p => p.Children.Where(...))`).
+- **Lazy loading** — `Find` / `FindAsync`
 - **Projection support** — anonymous types, scalars, `ValueTuple`, record DTOs, class member-init, nested shapes, and nested related-collection projections.
 - **Result materialization helpers** — `ToListAsync`, `ToDictionaryAsync`, `FirstOrDefaultAsync`, synchronous `.ToList()`.
 - **Filter operators** — `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `is null`, OR predicates, NOT predicates, `IN` lists.
@@ -166,33 +167,41 @@ var products = await db.Producto
     .ToListAsync();
 ```
 
+### 7. Lazy loading
+
+```csharp
+// Loads lazily related collections and parent relation properties on demand and cache-first hit
+var products = await db.Producto.FindAsync(idParm);
+```
+
 ---
 
 ## LINQ → PostgREST Translation Reference
 
-| LINQ / EF Core                            | PostgREST query-string              |
-|-------------------------------------------|-------------------------------------|
-| `.Where(e => e.Id == 1)`                  | `?id=eq.1`                          |
-| `.Where(e => e.Name != "x")`              | `?name=neq.x`                       |
-| `.Where(e => e.Age > 18)`                 | `?age=gt.18`                        |
-| `.Where(e => e.Age >= 18)`                | `?age=gte.18`                       |
-| `.Where(e => e.Age < 65)`                 | `?age=lt.65`                        |
-| `.Where(e => e.Name.Contains("foo"))`     | `?name=like.*foo*`                  |
-| `.Where(e => e.Name.StartsWith("A"))`     | `?name=like.A*`                     |
-| `.Where(e => e.Name.EndsWith("z"))`       | `?name=like.*z`                     |
-| `.Where(e => !e.Name.Contains("foo"))`    | `?name=not.like.*foo*`              |
-| `.Where(e => e.Id == 2 \|\| e.Id == 3)`   | `?or=(id=eq.2,id=eq.3)`             |
-| `.Where(e => e.Name == null)`             | `?name=is.null`                     |
-| `.Where(e => e.Name != null)`             | `?name=not.is.null`                 |
-| `.Where(e => ids.Contains(e.Id))`         | `?id=in.(1,2,3)`                    |
-| `.OrderBy(e => e.Name)`                   | `?order=name.asc`                   |
-| `.OrderByDescending(e => e.Name)`         | `?order=name.desc`                  |
-| `.Skip(10).Take(5)`                       | `?offset=10&limit=5`                |
-| `.Select(e => new { e.Id, e.Name })`      | `?select=id,name`                   |
-| `.ExecuteUpdateAsync(s => s.SetProperty(...))` | `PATCH /{table}?{filter}`      |
-| `.ExecuteDeleteAsync()`                   | `DELETE /{table}?{filter}`          |
-| `.Include(e => e.Children)`               | `?select=*,children(*)` (embedded)  |
-| `.Include(e => e.Children.Where(...))`    | filtered embedded resource          |
+| LINQ / EF Core                                 | PostgREST query-string                   |
+|------------------------------------------------|------------------------------------------|
+| `.Where(e => e.Id == 1)`                       | `?id=eq.1`                               |
+| `.Where(e => e.Name != "x")`                   | `?name=neq.x`                            |
+| `.Where(e => e.Age > 18)`                      | `?age=gt.18`                             |
+| `.Where(e => e.Age >= 18)`                     | `?age=gte.18`                            |
+| `.Where(e => e.Age < 65)`                      | `?age=lt.65`                             |
+| `.Where(e => e.Name.Contains("foo"))`          | `?name=like.*foo*`                       |
+| `.Where(e => e.Name.StartsWith("A"))`          | `?name=like.A*`                          |
+| `.Where(e => e.Name.EndsWith("z"))`            | `?name=like.*z`                          |
+| `.Where(e => !e.Name.Contains("foo"))`         | `?name=not.like.*foo*`                   |
+| `.Where(e => e.Id == 2 \|\| e.Id == 3)`        | `?or=(id=eq.2,id=eq.3)`                  |
+| `.Where(e => e.Name == null)`                  | `?name=is.null`                          |
+| `.Where(e => e.Name != null)`                  | `?name=not.is.null`                      |
+| `.Where(e => ids.Contains(e.Id))`              | `?id=in.(1,2,3)`                         |
+| `.OrderBy(e => e.Name)`                        | `?order=name.asc`                        |
+| `.OrderByDescending(e => e.Name)`              | `?order=name.desc`                       |
+| `.Skip(10).Take(5)`                            | `?offset=10&limit=5`                     |
+| `.Select(e => new { e.Id, e.Name })`           | `?select=id,name`                        |
+| `.ExecuteUpdateAsync(s => s.SetProperty(...))` | `PATCH /{table}?{filter}`                |
+| `.ExecuteDeleteAsync()`                        | `DELETE /{table}?{filter}`               |
+| `.Include(e => e.Children)`                    | `?select=*,children(*)` (embedded)       |
+| `.Include(e => e.Children.Where(...))`         | filtered embedded resource               |
+| `.FindAsync(idParam)`                          | loads embedded resources on demand lazily|
 
 ### EntityState → HTTP Verb
 
@@ -202,8 +211,8 @@ var products = await db.Producto
 | `Modified`            | `PATCH`   | `PATCH /{table}?{pk}=eq.{value}`           |
 | `Deleted`             | `DELETE`  | `DELETE /{table}?{pk}=eq.{value}`          |
 | `Unchanged` (query)   | `GET`     | `GET /{table}?select={cols}&{filters}`     |
-| Bulk (`ExecuteUpdateAsync`) | `PATCH` | `PATCH /{table}?{filter}`             |
-| Bulk (`ExecuteDeleteAsync`) | `DELETE` | `DELETE /{table}?{filter}`           |
+| Bulk Update (`ExecuteUpdateAsync`) | `PATCH` | `PATCH /{table}?{filter}`             |
+| Bulk Delete (`ExecuteDeleteAsync`) | `DELETE` | `DELETE /{table}?{filter}`           |
 
 ---
 
@@ -233,25 +242,6 @@ Reference the analyzer project as an analyzer in your `.csproj`:
 ```
 
 The generator produces one `.cs` file per table, ready to be used as EF Core entities.
-
----
-
-## Project Structure
-
-```
-PosgREST.DbContext.Provider.Core/     ← EF Core provider (the NuGet package)
-│   Extensions/                       ← UsePostgRest() options builder
-│   Infrastructure/                   ← IDbContextOptionsExtension
-│   Query/                            ← LINQ → HTTP translation pipeline
-│   Storage/                          ← IDatabase, IDatabaseCreator, type mapping
-│   Update/                           ← SaveChanges HTTP update pipeline
-│   Diagnostics/                      ← Logging definitions
-│
-PosgREST.DbContext.Provider/          ← Sample app + integration tests (xUnit)
-    AppDbContext.cs
-    Models/
-    Tests/
-```
 
 ---
 
