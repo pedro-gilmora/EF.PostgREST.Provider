@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Proxies.Internal;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
@@ -81,7 +82,7 @@ public sealed class PostgRestQueryingEnumerable<TIn, TOut>(
                     if (!hasColumns)
                     {
                         hasColumns = true;
-                        item = new JsonFullEntityTypeInfoResolver(col);
+                        item = new JsonFullEntityTypeInfoResolver(col, _queryContext.Context, _queryContext.ProxyFactory);
                     }
 
                     GetTopologicalRelatedEntities(col2);
@@ -91,7 +92,7 @@ public sealed class PostgRestQueryingEnumerable<TIn, TOut>(
 
             if (!hasColumns)
             {
-                item = new JsonFullEntityTypeInfoResolver(col);
+                item = new JsonFullEntityTypeInfoResolver(col, _queryContext.Context, _queryContext.ProxyFactory);
             }
         }
 
@@ -337,7 +338,8 @@ public sealed class PostgRestQueryingEnumerable<TIn, TOut>(
         }
     }
 
-    class JsonFullEntityTypeInfoResolver(ColumnsTree column) : IJsonTypeInfoResolver
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "EF1001:Internal EF Core API usage.", Justification = "<Pending>")]
+    class JsonFullEntityTypeInfoResolver(ColumnsTree column, Microsoft.EntityFrameworkCore.DbContext ctx, IProxyFactory? proxyFactory) : IJsonTypeInfoResolver
     {
         private JsonTypeInfo? typeInfo;
 
@@ -350,7 +352,9 @@ public sealed class PostgRestQueryingEnumerable<TIn, TOut>(
 
             typeInfo = JsonTypeInfo.CreateJsonTypeInfo(column.ClrType, options);
 
-            typeInfo.CreateObject ??= () => Activator.CreateInstance(column.ClrType)!;
+            typeInfo.CreateObject ??= proxyFactory is null 
+                ? () => Activator.CreateInstance(column.ClrType)! 
+                : () => proxyFactory.CreateProxy(ctx, column.TargetEntity, []);
 
             foreach (var targetMember in column.ClrType.GetMembers())
             {

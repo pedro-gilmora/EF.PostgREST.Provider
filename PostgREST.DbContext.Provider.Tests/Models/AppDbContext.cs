@@ -15,13 +15,15 @@ namespace PosgREST.DbContext.Provider.Console;
 /// DbContext targeting the PostgREST instance at the configured base URL.
 /// </summary>
 [SchemaDesign("http://localhost:3000")]
-public class AppDbContext(string baseUrl, bool enableLogs = false) : Microsoft.EntityFrameworkCore.DbContext
+public class AppDbContext(string baseUrl, bool enableLogs = false, bool enableLazyLoad = false) : Microsoft.EntityFrameworkCore.DbContext
 {
     //public DbSet<Producto> Productos { get; set; }
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
-        optionsBuilder
-            .UsePostgRest(baseUrl);
+        optionsBuilder.UsePostgRest(baseUrl);
+        
+        if(enableLazyLoad) optionsBuilder.UseLazyLoadingProxies();
+
 #if DEBUG
         if (enableLogs)
             optionsBuilder

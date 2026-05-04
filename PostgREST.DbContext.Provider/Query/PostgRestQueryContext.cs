@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.ChangeTracking.Internal;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Proxies.Internal;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.Extensions.Options;
 
@@ -21,25 +22,28 @@ namespace PosgREST.DbContext.Provider.Core.Query;
 /// <remarks>
 /// Creates a new <see cref="PostgRestQueryContext"/>.
 /// </remarks>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "EF1001:Internal EF Core API usage.", Justification = "Support in this custom EF Core provider")]
 public class PostgRestQueryContext(
     QueryContextDependencies dependencies,
     HttpClient httpClient,
     PostgRestDbContextOptionsExtension options,
-    IDiagnosticsLogger<DbLoggerCategory.Database.Command> commandLogger) : QueryContext(dependencies)
+    IDiagnosticsLogger<DbLoggerCategory.Database.Command>? commandLogger,
+    IProxyFactory? proxyFactory) : QueryContext(dependencies)
 {
     /// <summary>The <see cref="System.Net.Http.HttpClient"/> for PostgREST requests.</summary>
-    public HttpClient HttpClient { get; } = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+    public HttpClient HttpClient { get; } = httpClient;
 
     /// <summary>The PostgREST base URL (without trailing slash).</summary>
-    public string BaseUrl { get; } = options.BaseUrl?.TrimEnd('/') ?? throw new ArgumentNullException(nameof(options));
+    public string BaseUrl { get; } = options.BaseUrl?.TrimEnd('/') ?? throw new ArgumentNullException(nameof(options.BaseUrl));
 
     /// <summary>The provider options carrying auth token and schema.</summary>
-    public PostgRestDbContextOptionsExtension Options { get; } = options ?? throw new ArgumentNullException(nameof(options));
+    public PostgRestDbContextOptionsExtension Options { get; } = options;
 
     /// <summary>
     /// Diagnostics logger for emitting EF Core–style log messages for each
     /// HTTP GET request issued to the PostgREST endpoint.
     /// </summary>
-    public IDiagnosticsLogger<DbLoggerCategory.Database.Command> CommandLogger { get; } = commandLogger
-        ?? throw new ArgumentNullException(nameof(commandLogger));
+    public new IDiagnosticsLogger<DbLoggerCategory.Database.Command>? CommandLogger { get; } = commandLogger;
+
+    public IProxyFactory? ProxyFactory { get; } = proxyFactory        ;
 }

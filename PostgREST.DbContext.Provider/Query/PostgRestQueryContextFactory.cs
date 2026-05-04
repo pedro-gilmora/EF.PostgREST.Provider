@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Proxies.Internal;
 using Microsoft.EntityFrameworkCore.Query;
 using PosgREST.DbContext.Provider.Core.Infrastructure;
 
@@ -12,18 +13,21 @@ namespace PosgREST.DbContext.Provider.Core.Query;
 /// <remarks>
 /// Creates a new factory instance.
 /// </remarks>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "EF1001:Internal EF Core API usage.", Justification = "Support in this EF Core Provider")]
 public class PostgRestQueryContextFactory(
     QueryContextDependencies dependencies,
     HttpClient httpClient,
     PostgRestDbContextOptionsExtension options,
-    IDiagnosticsLogger<DbLoggerCategory.Database.Command> commandLogger) : IQueryContextFactory
+    IDiagnosticsLogger<DbLoggerCategory.Database.Command>? commandLogger,
+    IProxyFactory? proxyFactory = null) : IQueryContextFactory
 {
-    private readonly QueryContextDependencies _dependencies = dependencies ?? throw new ArgumentNullException(nameof(dependencies));
-    private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-    private readonly PostgRestDbContextOptionsExtension _options = options ?? throw new ArgumentNullException(nameof(options));
-    private readonly IDiagnosticsLogger<DbLoggerCategory.Database.Command> _commandLogger = commandLogger ?? throw new ArgumentNullException(nameof(commandLogger));
 
     /// <inheritdoc />
     public QueryContext Create()
-        => new PostgRestQueryContext(_dependencies, _httpClient, _options, _commandLogger);
+        => new PostgRestQueryContext(
+                dependencies ?? throw new ArgumentNullException(nameof(dependencies)),
+                httpClient ?? throw new ArgumentNullException(nameof(httpClient)),
+                options ?? throw new ArgumentNullException(nameof(options)),
+                commandLogger,
+                proxyFactory);
 }

@@ -52,5 +52,5 @@ public class Venta
     public int IdUnidadMedida { get; set; }
 
     [ForeignKey("IdProducto")]
-    public Producto Producto { get; set; }
+    public virtual Producto Producto { get; set; }
 }

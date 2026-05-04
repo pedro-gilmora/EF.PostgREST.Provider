@@ -73,7 +73,7 @@ public sealed class PostgRestUpdatePipeline(
 #if DEBUG
                 Stopwatch.GetElapsedTime(sw)
 #else  
-                -1
+                default
 #endif
 );
 
@@ -114,7 +114,7 @@ public sealed class PostgRestUpdatePipeline(
 #if DEBUG
                 Stopwatch.GetElapsedTime(sw)
 #else  
-                -1
+                default
 #endif
 );
 

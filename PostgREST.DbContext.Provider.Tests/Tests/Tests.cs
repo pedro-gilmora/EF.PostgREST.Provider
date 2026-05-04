@@ -183,6 +183,7 @@ public class Tests
 
         Assert.Empty(remaining);
     }
+
     [Fact]
     public async Task LoadIncludes()
     {
@@ -195,6 +196,18 @@ public class Tests
             .ToListAsync();
 
         ;
+    }
+
+    [Fact]
+    public async Task LazyLoad()
+    {
+        using var ctx = new AppDbContext(BaseUrl, true, true);
+
+        if (await ctx.Producto.FindAsync(313) is { } producto)
+        {
+            Assert.NotEmpty(producto.Compras);
+            Assert.NotNull(producto.Compras.FirstOrDefault()?.UnidadMedida);
+        }
     }
 }
 

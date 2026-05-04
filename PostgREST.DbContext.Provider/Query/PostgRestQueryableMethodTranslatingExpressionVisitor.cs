@@ -1209,6 +1209,11 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             columnName = memberExpr.Member.Name;
             return true;
         }
+        else if(expression is MethodCallExpression { Arguments: [{ } parameter, ConstantExpression { Value: string name } ] } && parameter == entityParam)
+        {
+            columnName = name;
+            return true;
+        }
 
         return false;
     }

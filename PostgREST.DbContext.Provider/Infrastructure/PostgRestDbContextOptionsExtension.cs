@@ -1,15 +1,19 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Internal;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.EntityFrameworkCore.Query.Internal;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+
 using PosgREST.DbContext.Provider.Core.Diagnostics;
 using PosgREST.DbContext.Provider.Core.Query;
 using PosgREST.DbContext.Provider.Core.Storage;
+
+//using SourceCrafter.EntityFrameworkCore.Internal;
 
 using System.Linq.Expressions;
 
@@ -70,6 +74,7 @@ public sealed class PostgRestDbContextOptionsExtension : IDbContextOptionsExtens
     /// <inheritdoc />
     public void ApplyServices(IServiceCollection services)
     {
+#pragma warning disable EF1001 // Internal EF Core API usage.
         new EntityFrameworkServicesBuilder(services)
             .TryAdd<IDatabaseProvider, PostgRestDatabaseProvider>()
             .TryAdd<IDatabase, PostgRestDatabase>()
@@ -77,10 +82,12 @@ public sealed class PostgRestDbContextOptionsExtension : IDbContextOptionsExtens
             .TryAdd<ITypeMappingSource, PostgRestTypeMappingSource>()
             .TryAdd<LoggingDefinitions, PostgRestLoggingDefinitions>()
             .TryAdd<IStructuralTypeMaterializerSource, MyMaterializer>()
+            //.TryAdd<IEntityFinder, PostgRestEntityFinder<TEntity>>()
             .TryAdd<IQueryContextFactory, PostgRestQueryContextFactory>()
             .TryAdd<IQueryableMethodTranslatingExpressionVisitorFactory, PostgRestQueryableMethodTranslatingExpressionVisitorFactory>()
             .TryAdd<IShapedQueryCompilingExpressionVisitorFactory, PostgRestShapedQueryCompilingExpressionVisitorFactory>()
             .TryAddCoreServices();
+#pragma warning restore EF1001 // Internal EF Core API usage.
 
         // Register a default HttpClient if the consumer hasn't provided one.
         // Consumers using IHttpClientFactory can replace this with their own instance.

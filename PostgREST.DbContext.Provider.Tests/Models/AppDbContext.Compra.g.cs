@@ -59,8 +59,8 @@ public class Compra
     public int IdUnidadMedida { get; set; }
 
     [ForeignKey(nameof(IdProducto))]
-    public Producto Producto { get; set; }
+    public virtual Producto Producto { get; set; }
 
     [ForeignKey(nameof(IdUnidadMedida))]
-    public UnidadMedida UnidadMedida { get; internal set; }
+    public virtual UnidadMedida UnidadMedida { get; internal set; }
 }

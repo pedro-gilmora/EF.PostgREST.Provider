@@ -37,8 +37,6 @@ public class PostgRestShapedQueryCompilingExpressionVisitor(ShapedQueryCompiling
             var rootParam = Expression.Parameter(queryExpression.EntityType.ClrType, "instance1");
             shaperExpression = PostgRestMaterializer.Build(queryExpression.EntityType, rootParam);
 
-            //shaperExpression = new ProjectionBindingRemovingVisitor(valueBufferParam).Visit(shaperExpression);
-
             queryExpression.Projector = Expression.Lambda(
                 shaperExpression,
                 QueryCompilationContext.QueryContextParameter,
