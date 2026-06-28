@@ -2,7 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Query;
-
+using PosgREST.DbContext.Provider.Core.Diagnostics;
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -36,9 +37,24 @@ public static class PostgRestBulkUpdateExecutor
         IReadOnlyList<SetterInfo> setters)
     {
         var ctx = (PostgRestQueryContext)queryContext;
+        var body = SerializeSetters(ctx, setters);
+        var url = BuildUrl(ctx, tableName, filters, orFilters);
 
-        using var request = BuildRequest(ctx, tableName, filters, orFilters, setters);
+        using var request = BuildRequest(ctx, url, body);
+
+        ctx.CommandLogger?.LogRequestExecuting(HttpMethod.Get.Method, request.RequestUri!.ToString(), body);
+
+        var sw = Stopwatch.GetTimestamp();
+
         using var response = ctx.HttpClient.Send(request, HttpCompletionOption.ResponseContentRead);
+
+
+        ctx.CommandLogger?.LogRequestExecuted(
+            HttpMethod.Get.Method,
+            request.RequestUri!.ToString(),
+            (int)response.StatusCode,
+            Stopwatch.GetElapsedTime(sw));
+
         PostgRestException.ThrowIfError(response);
 
         var affected = ParseAffectedRows(response);
@@ -60,11 +76,25 @@ public static class PostgRestBulkUpdateExecutor
     {
         var ctx = (PostgRestQueryContext)queryContext;
         var cancellationToken = queryContext.CancellationToken;
+        var url = BuildUrl(ctx, tableName, filters, orFilters);
+        var body = SerializeSetters(ctx, setters);
 
-        using var request = BuildRequest(ctx, tableName, filters, orFilters, setters);
+        using var request = BuildRequest(ctx, url, body);
+
+        ctx.CommandLogger?.LogRequestExecuting(HttpMethod.Get.Method, request.RequestUri!.ToString(), body);
+
+        var sw = Stopwatch.GetTimestamp();
+
         using var response = await ctx.HttpClient
             .SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken)
             .ConfigureAwait(false);
+
+        ctx.CommandLogger?.LogRequestExecuted(
+            HttpMethod.Get.Method,
+            request.RequestUri!.ToString(),
+            (int)response.StatusCode,
+            Stopwatch.GetElapsedTime(sw));
+
         await PostgRestException.ThrowIfErrorAsync(response, cancellationToken).ConfigureAwait(false);
 
         var affected = ParseAffectedRows(response);
@@ -134,14 +164,9 @@ public static class PostgRestBulkUpdateExecutor
 
     private static HttpRequestMessage BuildRequest(
         PostgRestQueryContext ctx,
-        string tableName,
-        IReadOnlyList<PostgRestFilter> filters,
-        IReadOnlyList<PostgRestOrFilter> orFilters,
-        IReadOnlyList<SetterInfo> setters)
+        string url,
+        string body)
     {
-        var url = BuildUrl(ctx, tableName, filters, orFilters);
-        var body = SerializeSetters(ctx, setters);
-
         var request = new HttpRequestMessage(HttpMethod.Patch, url)
         {
             Content = new StringContent(body, Encoding.UTF8, "application/json")

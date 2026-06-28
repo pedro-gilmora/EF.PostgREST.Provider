@@ -20,7 +20,7 @@ public class AppDbContext(string baseUrl, bool enableLogs = false, bool enableLa
     //public DbSet<Producto> Productos { get; set; }
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
-        optionsBuilder.UsePostgRest(baseUrl);
+        optionsBuilder.UsePostgRest(baseUrl, o => o.WithLogging());
         
         if(enableLazyLoad) optionsBuilder.UseLazyLoadingProxies();
 

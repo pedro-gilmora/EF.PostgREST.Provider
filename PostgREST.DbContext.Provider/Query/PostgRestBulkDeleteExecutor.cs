@@ -4,7 +4,8 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.VisualBasic;
-
+using PosgREST.DbContext.Provider.Core.Diagnostics;
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
@@ -40,11 +41,23 @@ public static class PostgRestBulkDeleteExecutor
         var ctx = (PostgRestQueryContext)queryContext;
 
         using var request = BuildRequest(ctx, tableName, filters, orFilters);
+
+        ctx.CommandLogger?.LogRequestExecuting(HttpMethod.Get.Method, request.RequestUri!.ToString(), body: null);
+
+        var sw = Stopwatch.GetTimestamp();
+
         using var response = ctx.HttpClient.Send(request, HttpCompletionOption.ResponseContentRead);
+
+        ctx.CommandLogger?.LogRequestExecuted(
+            HttpMethod.Get.Method,
+            request.RequestUri!.ToString(),
+            (int)response.StatusCode,
+            Stopwatch.GetElapsedTime(sw));
+
         PostgRestException.ThrowIfError(response);
 
         SyncTrackedEntities(ctx, entityType, filters, orFilters);
-       
+
         var affected = ParseAffectedRows(response);
         return affected;
     }
@@ -64,13 +77,25 @@ public static class PostgRestBulkDeleteExecutor
         var cancellationToken = queryContext.CancellationToken;
 
         using var request = BuildRequest(ctx, tableName, filters, orFilters);
+
+        ctx.CommandLogger?.LogRequestExecuting(HttpMethod.Get.Method, request.RequestUri!.ToString(), body: null);
+
+        var sw = Stopwatch.GetTimestamp();
+
         using var response = await ctx.HttpClient
             .SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken)
             .ConfigureAwait(false);
+
+        ctx.CommandLogger?.LogRequestExecuted(
+            HttpMethod.Get.Method,
+            request.RequestUri!.ToString(),
+            (int)response.StatusCode,
+            Stopwatch.GetElapsedTime(sw));
+
         await PostgRestException.ThrowIfErrorAsync(response, cancellationToken).ConfigureAwait(false);
-       
+
         SyncTrackedEntities(ctx, entityType, filters, orFilters);
-       
+
         var affected = ParseAffectedRows(response);
         return affected;
     }
@@ -96,7 +121,7 @@ public static class PostgRestBulkDeleteExecutor
 
             var entryObject = entry.Entity;
 
-            if (!filters.All(Filter) && !orFilters.Any(r => r.Branches.Any(Filter))) continue; 
+            if (!filters.All(Filter) && !orFilters.Any(r => r.Branches.Any(Filter))) continue;
 
             ctx.Context.Remove(entry.Entity);
             // Accept changes: EF re-reads CurrentValue from the CLR object (now updated)

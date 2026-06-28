@@ -28,6 +28,6 @@ public class PostgRestQueryContextFactory(
                 dependencies ?? throw new ArgumentNullException(nameof(dependencies)),
                 httpClient ?? throw new ArgumentNullException(nameof(httpClient)),
                 options ?? throw new ArgumentNullException(nameof(options)),
-                commandLogger,
+                options.Logging ? commandLogger : null,
                 proxyFactory);
 }

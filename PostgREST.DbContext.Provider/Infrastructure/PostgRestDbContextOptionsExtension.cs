@@ -44,6 +44,7 @@ public sealed class PostgRestDbContextOptionsExtension : IDbContextOptionsExtens
         BearerToken = copyFrom.BearerToken;
         Schema = copyFrom.Schema;
         Timeout = copyFrom.Timeout;
+        Logging = copyFrom.Logging;
     }
 
     /// <summary>
@@ -70,6 +71,8 @@ public sealed class PostgRestDbContextOptionsExtension : IDbContextOptionsExtens
     /// <inheritdoc />
     public DbContextOptionsExtensionInfo Info
         => _info ??= new PostgRestOptionsExtensionInfo(this);
+
+    public bool Logging { get; private set; }
 
     /// <inheritdoc />
     public void ApplyServices(IServiceCollection services)
@@ -138,6 +141,9 @@ public sealed class PostgRestDbContextOptionsExtension : IDbContextOptionsExtens
     /// </summary>
     public PostgRestDbContextOptionsExtension WithTimeout(TimeSpan timeout)
         => new(this) { Timeout = timeout };
+
+    internal PostgRestDbContextOptionsExtension WithLogging()
+        => new(this) { Logging = true };
 
     private sealed class PostgRestOptionsExtensionInfo(
         PostgRestDbContextOptionsExtension extension) : DbContextOptionsExtensionInfo(extension)

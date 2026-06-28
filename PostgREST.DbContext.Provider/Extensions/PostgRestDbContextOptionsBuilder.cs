@@ -52,6 +52,18 @@ public class PostgRestDbContextOptionsBuilder
     /// </summary>
     /// <param name="schema">The PostgreSQL schema name.</param>
     /// <returns>This builder for fluent chaining.</returns>
+    public PostgRestDbContextOptionsBuilder WithLogging()
+    {
+        UpdateExtension(e => e.WithLogging());
+        return this;
+    }
+
+    /// <summary>
+    /// Targets a non-default PostgreSQL schema via the
+    /// <c>Accept-Profile</c> and <c>Content-Profile</c> PostgREST headers.
+    /// </summary>
+    /// <param name="schema">The PostgreSQL schema name.</param>
+    /// <returns>This builder for fluent chaining.</returns>
     public PostgRestDbContextOptionsBuilder WithSchema(string schema)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(schema);
