@@ -48,12 +48,11 @@ public sealed class PostgRestQueryingEnumerable<TIn, TOut>(
     public IEnumerator<TOut> GetEnumerator() => new Enumerator(_queryContext, _selector, BuildUrl, GetJsonOptions());
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    /// <inheritdoc />
+    public string ToQueryString() => BuildUrl();
 
     /// <inheritdoc />
     public IAsyncEnumerator<TOut> GetAsyncEnumerator(CancellationToken cancellationToken = default) => new AsyncEnumerator(_queryContext, _selector, BuildUrl, GetJsonOptions(), cancellationToken);
-
-    /// <inheritdoc />
-    public string ToQueryString() => BuildUrl();
 
     JsonSerializerOptions GetJsonOptions()
     {
@@ -212,7 +211,7 @@ public sealed class PostgRestQueryingEnumerable<TIn, TOut>(
             ApplyHeaders(request, queryContext);
 
 #if DEBUG
-            queryContext.CommandLogger.LogRequestExecuting(HttpMethod.Get.Method, url, body: null);
+            queryContext.CommandLogger?.LogRequestExecuting(HttpMethod.Get.Method, url, body: null);
 
             var sw = Stopwatch.GetTimestamp();
 #endif
@@ -221,7 +220,7 @@ public sealed class PostgRestQueryingEnumerable<TIn, TOut>(
                 .Send(request, HttpCompletionOption.ResponseContentRead);
 
 #if DEBUG
-            queryContext.CommandLogger.LogRequestExecuted(
+            queryContext.CommandLogger?.LogRequestExecuted(
                 HttpMethod.Get.Method,
                 url,
                 (int)response.StatusCode,
@@ -281,7 +280,7 @@ public sealed class PostgRestQueryingEnumerable<TIn, TOut>(
             ApplyHeaders(request, queryContext);
 
 #if DEBUG
-            queryContext.CommandLogger.LogRequestExecuting(HttpMethod.Get.Method, url, body: null);
+            queryContext.CommandLogger?.LogRequestExecuting(HttpMethod.Get.Method, url, body: null);
 
             var sw = Stopwatch.GetTimestamp();
 #endif
@@ -290,7 +289,7 @@ public sealed class PostgRestQueryingEnumerable<TIn, TOut>(
                 .ConfigureAwait(false);
 
 #if DEBUG
-            queryContext.CommandLogger.LogRequestExecuted(
+            queryContext.CommandLogger?.LogRequestExecuted(
                 HttpMethod.Get.Method,
                 url,
                 (int)response.StatusCode,

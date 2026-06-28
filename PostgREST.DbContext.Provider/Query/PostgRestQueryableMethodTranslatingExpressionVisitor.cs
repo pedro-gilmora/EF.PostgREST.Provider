@@ -294,10 +294,14 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
 
         void CheckInnerInclude(Expression navExpression, ColumnsTree parentColumn, IEntityType entityType)
         {
-            if (navExpression is MaterializeCollectionNavigationExpression { 
-                    Subquery: MethodCallExpression { 
-                        Arguments: [{ } target, UnaryExpression { 
-                            Operand: LambdaExpression {
+            if (navExpression is MaterializeCollectionNavigationExpression
+                {
+                    Subquery: MethodCallExpression
+                    {
+                        Arguments: [{ } target, UnaryExpression
+                        {
+                            Operand: LambdaExpression
+                            {
                                 Body: IncludeExpression include
                             }
                         }]
@@ -305,8 +309,9 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
                 })
             {
                 RegisterInclude(include, parentColumn);
-                if (target is MethodCallExpression {
-                        Arguments: [MethodCallExpression { Arguments: [MethodCallExpression{ Method.Name: "Where" and var methodName }, UnaryExpression { Operand: LambdaExpression selector }] args2 }, ..]
+                if (target is MethodCallExpression
+                    {
+                        Arguments: [MethodCallExpression { Arguments: [MethodCallExpression { Method.Name: "Where" and var methodName }, UnaryExpression { Operand: LambdaExpression selector }] args2 }, ..]
                     })
                 {
                     TryExtractFilters(selector.Body, selector.Parameters[0], queryExpression, entityType, parentColumn.Identifier);
@@ -1082,9 +1087,13 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             if (call.Method.Name == nameof(string.Contains)
                 && call.Object is not null
                 && TryExtractPropertyName(call.Object, entityParam, out var pName) && entityType.GetProperty(pName)?.ColumnName is { } column
-                && call.Arguments.Count == 1
+                && call.Arguments.Count is 1 or 2
                 && TryExtractValue(call.Arguments[0], out var value, out var paramName, out var isParam))
             {
+                var op = call.Arguments is [_, ConstantExpression { Type.Name: nameof(StringComparison), Value: StringComparison.CurrentCultureIgnoreCase or StringComparison.OrdinalIgnoreCase or StringComparison.InvariantCultureIgnoreCase }]
+                            ? PostgRestFilterOperator.ILike
+                            : PostgRestFilterOperator.Like;
+
                 if (parentExpression != null)
                     column = parentExpression + '.' + column;
 
@@ -1093,7 +1102,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
                 {
                     PropertyName = pName,
                     Column = column,
-                    Operator = PostgRestFilterOperator.Like,
+                    Operator = op,
                     Value = likeValue,
                     ParameterName = paramName,
                     IsParameter = isParam
@@ -1209,7 +1218,7 @@ public class PostgRestQueryableMethodTranslatingExpressionVisitor(
             columnName = memberExpr.Member.Name;
             return true;
         }
-        else if(expression is MethodCallExpression { Arguments: [{ } parameter, ConstantExpression { Value: string name } ] } && parameter == entityParam)
+        else if (expression is MethodCallExpression { Arguments: [{ } parameter, ConstantExpression { Value: string name }] } && parameter == entityParam)
         {
             columnName = name;
             return true;

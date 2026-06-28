@@ -49,31 +49,6 @@ public class PostgRestTypeMappingSource(TypeMappingSourceDependencies dependenci
         [typeof(byte[])] = JsonByteArrayReaderWriter.Instance,
     };
 
-    /// <summary>
-    /// Set of CLR types the PostgREST provider can map natively.
-    /// </summary>
-    private static readonly HashSet<Type> _supportedPrimitives =
-    [
-        typeof(bool),
-        typeof(byte),
-        typeof(short),
-        typeof(int),
-        typeof(long),
-        typeof(float),
-        typeof(double),
-        typeof(decimal),
-        typeof(string),
-        typeof(char),
-        typeof(Guid),
-        typeof(DateTime),
-        typeof(DateTimeOffset),
-        typeof(DateOnly),
-        typeof(TimeOnly),
-        typeof(TimeSpan),
-        typeof(byte[]),
-        typeof(JsonElement),
-    ];
-
     /// <inheritdoc />
     public override CoreTypeMapping? FindMapping(Type type)
     {

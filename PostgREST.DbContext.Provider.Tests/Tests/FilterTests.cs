@@ -104,6 +104,22 @@ public class FilterTests
     }
 
     // ──────────────────────────────────────────────────────────────────────────
+    //  TEST 11 — NOT predicate  → ?nombre=ilike.*Test*
+    // ──────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Where_ILike_ExcludesMatchingRows()
+    {
+        await using var db = new AppDbContext(BaseUrl, true);
+
+        var result = await db.Producto
+            .FirstOrDefaultAsync(c => c.Nombre.Contains("leche", StringComparison.OrdinalIgnoreCase));
+
+        Assert.NotNull(result);
+        Assert.Contains("leche", result.Nombre, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
     //  TEST 12 — NULL / NOT NULL check  (uses Personas which has nullable Nombre)
     // ──────────────────────────────────────────────────────────────────────────
 
