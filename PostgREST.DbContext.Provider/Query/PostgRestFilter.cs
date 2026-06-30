@@ -50,7 +50,7 @@ public sealed class PostgRestFilter
         }
 
         var formattedValue = FormatValue(resolvedValue);
-        return $"{Column}={prefix}{Operator.ToPostgRestToken()}.{formattedValue}";
+        return $"{Column}={prefix}{Operator.ToPostgRestToken(formattedValue)}";
     }
 
     /// <summary>
@@ -68,7 +68,7 @@ public sealed class PostgRestFilter
         }
 
         var formattedValue = FormatValue(resolvedValue);
-        return $"{Column}.{prefix}{Operator.ToPostgRestToken()}.{formattedValue}";
+        return $"{Column}.{prefix}{Operator.ToPostgRestToken(formattedValue)}";
     }
 
     internal static string FormatValue(object? value) => value switch

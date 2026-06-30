@@ -45,18 +45,18 @@ public static class PostgRestFilterOperatorExtensions
     /// <summary>
     /// Returns the PostgREST query-string token for this operator.
     /// </summary>
-    public static string ToPostgRestToken(this PostgRestFilterOperator op) => op switch
+    public static string ToPostgRestToken(this PostgRestFilterOperator op, string formattedValue) => op switch
     {
-        PostgRestFilterOperator.Equal => "eq",
-        PostgRestFilterOperator.NotEqual => "neq",
-        PostgRestFilterOperator.GreaterThan => "gt",
-        PostgRestFilterOperator.GreaterThanOrEqual => "gte",
-        PostgRestFilterOperator.LessThan => "lt",
-        PostgRestFilterOperator.LessThanOrEqual => "lte",
-        PostgRestFilterOperator.Like => "like",
-        PostgRestFilterOperator.ILike => "ilike",
-        PostgRestFilterOperator.Is => "is",
-        PostgRestFilterOperator.In => "in",
+        PostgRestFilterOperator.Equal => $"eq.{formattedValue}",
+        PostgRestFilterOperator.NotEqual => $"neq.{formattedValue}",
+        PostgRestFilterOperator.GreaterThan => $"gt.{formattedValue}",
+        PostgRestFilterOperator.GreaterThanOrEqual => $"gte.{formattedValue}",
+        PostgRestFilterOperator.LessThan => $"lt.{formattedValue}",
+        PostgRestFilterOperator.LessThanOrEqual => $"lte.{formattedValue}",
+        PostgRestFilterOperator.Like => $"like.*{formattedValue}*",
+        PostgRestFilterOperator.ILike => $"ilike.*{formattedValue}*",
+        PostgRestFilterOperator.Is => $"is.{formattedValue}",
+        PostgRestFilterOperator.In => $"in.{formattedValue}",
         _ => throw new ArgumentOutOfRangeException(nameof(op), op, null)
     };
 }
